@@ -3,5 +3,5 @@
 *.out
 *.debug
 .DS_Store
-traceroute
+ft_traceroute
 *.log

@@ -15,3 +15,9 @@ typedef struct ProbeResult
     const Probe probe;
     const int rtt;
 } ProbeResult;
+
+typedef struct Args
+{
+    const char *host;
+    const bool help;
+} Args;

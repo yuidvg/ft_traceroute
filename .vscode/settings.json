@@ -11,5 +11,6 @@
 		"netdb.h": "c",
 		"prototypes.h": "c",
 		"types.h": "c"
-	}
+	},
+	"editor.formatOnSave": false
 }

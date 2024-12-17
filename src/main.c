@@ -44,6 +44,8 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
+
+
 int main(int argc, char *argv[])
 {
     if (argc > 1)
@@ -62,8 +64,13 @@ int main(int argc, char *argv[])
             printHelp();
             return 1;
         }
-
         printf("Host: %s\n", args.host);
+        struct sockaddr_in addr = parseAddrOrExitFailure(args.host);
+        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(addr.sin_addr), DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);
+        while (true)
+        {
+            
+        }
     }
     else
     {

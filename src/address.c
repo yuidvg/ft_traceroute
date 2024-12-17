@@ -21,32 +21,24 @@ int equal_addr(const struct sockaddr_in *a, const struct sockaddr_in *b)
         return !ft_memcmp(&a->sin_addr, &b->sin_addr, sizeof(a->sin_addr));
 }
 
-struct sockaddr_in parseAddr(char *host)
+struct sockaddr_in parseAddrOrExitFailure(const char *host)
 {
-    struct addrinfo hints, *res, *p;
-    struct sockaddr_in addr;
-    int status;
+    const struct addrinfo hints = {
+        .ai_family = AF_INET,
+    };
+    struct addrinfo *res;
 
-    ft_memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; // Use AF_INET for IPv4
-    hints.ai_socktype = SOCK_STREAM;
-
-    if ((status = getaddrinfo(host, NULL, &hints, &res)) != 0)
+    const int status = getaddrinfo(host, NULL, &hints, &res);
+    if (status == 0 && res && res->ai_family == AF_INET)
     {
+        const struct sockaddr_in addr = *(struct sockaddr_in *)res->ai_addr;
+        freeaddrinfo(res);
+        return addr;
+    }
+    else
+    {
+        freeaddrinfo(res);
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
-        exit(1);
+        exit(EXIT_FAILURE);
     }
-
-    for (p = res; p != NULL; p = p->ai_next)
-    {
-        if (p->ai_family == AF_INET)
-        {
-            addr = *(struct sockaddr_in *)p->ai_addr;
-            break;
-        }
-    }
-
-    freeaddrinfo(res);
-
-    return addr;
 }

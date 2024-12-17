@@ -1,4 +1,5 @@
 #pragma once
+#include "external.h"
 
 #define DEFAULT_HOPS_MAX 30
 #define DEFAULT_PROBES_PER_HOP 3

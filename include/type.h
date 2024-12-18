@@ -4,17 +4,15 @@
 
 typedef struct Probe
 {
-    const int socketFd;
-    const struct sockaddr_in destination;
-    const int ttl;
-    const int seq;
+    int ttl;
+    int seq;
+    struct sockaddr_in destination;
+    int socketFd;
+    struct timeval timeSent;
+    struct timeval timeReceived;
+    bool final;
+    char errorString[ERROR_STRING_SIZE_MAX];
 } Probe;
-
-typedef struct ProbeResult
-{
-    const Probe probe;
-    const int rtt;
-} ProbeResult;
 
 typedef struct Args
 {

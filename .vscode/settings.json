@@ -10,7 +10,8 @@
 		"udp.h": "c",
 		"netdb.h": "c",
 		"prototypes.h": "c",
-		"types.h": "c"
+		"types.h": "c",
+		"stdlib.h": "c"
 	},
-	"editor.formatOnSave": false
+	"editor.formatOnSave": true
 }

@@ -1,6 +1,5 @@
 #include "all.h"
 
-
 // static Probe *udp_check_reply(int socketFd, int err, struct sockaddr_in *from, char *buf, size_t len)
 // {
 //     Probe *pb;
@@ -44,8 +43,6 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
-
-
 int main(int argc, char *argv[])
 {
     if (argc > 1)
@@ -66,10 +63,33 @@ int main(int argc, char *argv[])
         }
         printf("Host: %s\n", args.host);
         struct sockaddr_in addr = parseAddrOrExitFailure(args.host);
-        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(addr.sin_addr), DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);
-        while (true)
+
+        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(addr.sin_addr),
+               DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);
+
+        Probe probes[DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP];
+        initializeProbes(probes, NUMBER_OF_ITEMS(probes));
+        int firstProbeToProcessIndex = 0;
+        int lastProbeToProcessIndex = NUMBER_OF_ITEMS(probes);
+        size_t numberOfProbesOnItsWay = 0;
+        while (firstProbeToProcessIndex < lastProbeToProcessIndex)
         {
-            
+            for (int i = 0; i + firstProbeToProcessIndex < lastProbeToProcessIndex &&
+                               numberOfProbesOnItsWay < DEFAULT_SIMALTANIOUS_PROBES;
+                 i++)
+            {
+                int probeIndex = i + firstProbeToProcessIndex;
+                if (probes[probeIndex].timeSent.tv_sec == 0)
+                {
+                    sendProbe(&probes[probeIndex]);
+                    numberOfProbesOnItsWay++;
+                }
+                else if (probes[probeIndex].timeReceived.tv_sec != 0)
+                {
+                    printProbe(&probes[probeIndex]);
+                }
+            }
+            firstProbeToProcessIndex = getFirstProbeToProcessIndex(probes, NUMBER_OF_ITEMS(probes));
         }
     }
     else

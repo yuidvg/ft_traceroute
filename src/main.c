@@ -71,14 +71,41 @@ int main(int argc, char *argv[])
         initializeProbes(probes, NUMBER_OF_ITEMS(probes));
         int firstProbeToProcessIndex = 0;
         int lastProbeToProcessIndex = NUMBER_OF_ITEMS(probes);
-        size_t numberOfProbesOnItsWay = 0;
+
+        fd_set readfds;
+        struct timeval timeout;
+        int max_sd;
+
         while (firstProbeToProcessIndex < lastProbeToProcessIndex)
         {
+            size_t numberOfProbesOnItsWay = 0;
+            struct timeval nextTimeToProcess;
+
+            FD_ZERO(&readfds);
+            max_sd = 0;
+
             for (int i = 0; i + firstProbeToProcessIndex < lastProbeToProcessIndex &&
-                               numberOfProbesOnItsWay < DEFAULT_SIMALTANIOUS_PROBES;
+                            numberOfProbesOnItsWay < DEFAULT_SIMALTANIOUS_PROBES;
                  i++)
             {
+                // Expiracy management Of firstProbeToProcessIndex
                 int probeIndex = i + firstProbeToProcessIndex;
+                if (probeIndex == firstProbeToProcessIndex && !isTimeExist(probes[probeIndex].timeReceived) &&
+                    isTimeExist(probes[probeIndex].timeSent))
+                {
+                    const struct timeval expirationTime = timeSum(probes[probeIndex].timeSent, DEFAULT_EXPIRATION_TIME);
+
+                    if (isTimeExist(timeDifference(timeOfDay(), expirationTime)))
+                    {
+                        /* Normal scenario: future expiry time */
+                        nextTimeToProcess = expirationTime;
+                    }
+                    else
+                    {
+                        /* Else scenario: expired now */
+                        expireProbe(&probes[probeIndex]);
+                    }
+                }
                 if (probes[probeIndex].timeSent.tv_sec == 0)
                 {
                     sendProbe(&probes[probeIndex]);
@@ -87,8 +114,37 @@ int main(int argc, char *argv[])
                 else if (probes[probeIndex].timeReceived.tv_sec != 0)
                 {
                     printProbe(&probes[probeIndex]);
+                    probes[probeIndex].printed = true;
+                }
+                else
+                {
+                    FD_SET(probes[probeIndex].socketFd, &readfds);
+                    if (probes[probeIndex].socketFd > max_sd)
+                    {
+                        max_sd = probes[probeIndex].socketFd;
+                    }
+                }
+                numberOfProbesOnItsWay++;
+            }
+
+            timeout.tv_sec = 1;
+            timeout.tv_usec = 0;
+
+            const int numberOfReadableSokets = select(max_sd + 1, &readfds, NULL, NULL, &timeout);
+            if (numberOfReadableSokets < 0 && errno != EINTR)
+                error("select error");
+
+            for (int i = 0; i + firstProbeToProcessIndex < lastProbeToProcessIndex; i++)
+            {
+                int probeIndex = i + firstProbeToProcessIndex;
+                if (FD_ISSET(probes[probeIndex].socketFd, &readfds))
+                {
+                    // Handle the probe response here
+                    // For example, you can call a function to process the response
+                    // processProbeResponse(&probes[probeIndex]);
                 }
             }
+
             firstProbeToProcessIndex = getFirstProbeToProcessIndex(probes, NUMBER_OF_ITEMS(probes));
         }
     }

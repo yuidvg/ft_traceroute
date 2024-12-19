@@ -12,6 +12,8 @@ typedef struct Probe
     struct timeval timeReceived;
     bool final;
     char errorString[ERROR_STRING_SIZE_MAX];
+    bool expired;
+    bool printed;
 } Probe;
 
 typedef struct Args

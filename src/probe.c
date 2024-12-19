@@ -8,6 +8,8 @@ void initializeProbes(Probe *probes, size_t count)
         probes[i].seq = i + 1;
         probes[i].socketFd = -1;
         probes[i].final = false;
+        probes[i].expired = false;
+        probes[i].printed = false;
     }
 }
 
@@ -51,4 +53,11 @@ int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
             return i;
     }
     return -1;
+}
+
+void expireProbe(Probe *probe)
+{
+    close(probe->socketFd);
+    probe->socketFd = -1;
+    probe->expired = true;
 }

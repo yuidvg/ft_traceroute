@@ -26,6 +26,11 @@ struct timeval timeOfDay()
     return time;
 }
 
+bool isTimeExist(const struct timeval time)
+{
+    return time.tv_sec == 0 && time.tv_usec == 0;
+}
+
 // static double get_timeout(Probe *pb)
 // {
 //     double value;

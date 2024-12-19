@@ -18,6 +18,7 @@ struct sockaddr_in parseAddrOrExitFailure(const char *host);
 void initializeProbes(Probe *probes, size_t numberOfProbes);
 void sendProbe(Probe *probe);
 void printProbe(Probe *probe);
+void expireProbe(Probe *probe);
 
 // Socket
 void setTtl(int socketFd, int ttl);
@@ -29,3 +30,4 @@ struct timeval timeDifference(const struct timeval start, const struct timeval e
 struct timeval timeSum(const struct timeval time1, const struct timeval time2);
 double_t timeValInMiliseconds(const struct timeval timeVal);
 struct timeval timeOfDay();
+bool isTimeExist(const struct timeval time);

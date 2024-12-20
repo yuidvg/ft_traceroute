@@ -11,7 +11,13 @@
 		"netdb.h": "c",
 		"prototypes.h": "c",
 		"types.h": "c",
-		"stdlib.h": "c"
+		"stdlib.h": "c",
+		"ip_icmp.h": "c",
+		"math.h": "c",
+		"errno.h": "c",
+		"stdbool.h": "c",
+		"inet.h": "c",
+		"time.h": "c"
 	},
 	"editor.formatOnSave": true
 }

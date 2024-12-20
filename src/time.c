@@ -1,16 +1,28 @@
 #include "all.h"
 
+
+
 struct timeval timeDifference(const struct timeval start, const struct timeval end)
 {
     struct timeval result;
-    timersub(&end, &start, &result);
+    result.tv_sec = end.tv_sec - start.tv_sec;
+    result.tv_usec = end.tv_usec - start.tv_usec;
+    if (result.tv_usec < 0) {
+        result.tv_sec -= 1;
+        result.tv_usec += 1000000;
+    }
     return result;
 }
 
 struct timeval timeSum(const struct timeval time1, const struct timeval time2)
 {
     struct timeval result;
-    timeradd(&time1, &time2, &result);
+    result.tv_sec = time1.tv_sec + time2.tv_sec;
+    result.tv_usec = time1.tv_usec + time2.tv_usec;
+    if (result.tv_usec >= 1000000) {
+        result.tv_sec += 1;
+        result.tv_usec -= 1000000;
+    }
     return result;
 }
 
@@ -26,9 +38,19 @@ struct timeval timeOfDay()
     return time;
 }
 
-bool isTimeExist(const struct timeval time)
+bool isTimeNonZero(const struct timeval time)
 {
-    return time.tv_sec == 0 && time.tv_usec == 0;
+    return time.tv_sec != 0 || time.tv_usec != 0;
+}
+
+struct timeval timeMax(const struct timeval time1, const struct timeval time2)
+{
+    return (time1.tv_sec > time2.tv_sec || (time1.tv_sec == time2.tv_sec && time1.tv_usec > time2.tv_usec)) ? time1 : time2;
+}
+
+struct timeval timeMin(const struct timeval time1, const struct timeval time2)
+{
+    return (time1.tv_sec < time2.tv_sec || (time1.tv_sec == time2.tv_sec && time1.tv_usec < time2.tv_usec)) ? time1 : time2;
 }
 
 // static double get_timeout(Probe *pb)

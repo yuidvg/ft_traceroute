@@ -74,7 +74,16 @@ size_t ft_strlen(const char *s)
 
 void error(const char *str)
 {
-    fprintf(stderr, "\n");
+    fprintf(stderr, "%s\n", str);
     exit(EXIT_FAILURE);
 }
 
+int max(int a, int b)
+{
+    return a > b ? a : b;
+}
+
+int min(int a, int b)
+{
+    return a < b ? a : b;
+}

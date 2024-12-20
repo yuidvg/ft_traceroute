@@ -39,8 +39,86 @@ static Args parseArgs(int argc, char *argv[])
                 host = argv[i];
         }
     }
-
     return (Args){host, help};
+}
+
+static ProcessProbeResult processProbe(Probe *probe) // returns nextTimeToProcess
+{
+    struct timeval nextTimeToProcess;
+
+    // Expiration Management
+    if (!isTimeNonZero(probe->timeReceived) && isTimeNonZero(probe->timeSent))
+    {
+        const struct timeval expirationTime = timeSum(probe->timeSent, DEFAULT_EXPIRATION_TIME);
+
+        if (isTimeNonZero(timeDifference(timeOfDay(), expirationTime)))
+        {
+            /* Normal scenario: future expiry time */
+            nextTimeToProcess = expirationTime;
+        }
+        else
+        {
+            /* Else scenario: expired now */
+            expireProbe(probe);
+        }
+    }
+
+    // Send Probe
+    const int sentNumber = !isTimeNonZero(probe->timeSent) ? sendProbe(probe), 1 : 0;
+    // Print Probe
+    if (isTimeNonZero(probe->timeReceived))
+    {
+        printProbe(probe);
+        probe->printed = true;
+    }
+    return (ProcessProbeResult){nextTimeToProcess, sentNumber};
+}
+
+static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes)
+{
+    fd_set watchSds;
+    int maxSd;
+    FD_ZERO(&watchSds);
+    for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP; i++)
+    {
+        if (probes[i].sd != -1)
+        {
+            maxSd = max(maxSd, probes[i].sd);
+            FD_SET(probes[i].sd, &watchSds);
+        }
+    }
+    struct timeval timeout = timeDifference(timeOfDay(), nextTimeToProcessProbes);
+    const int numberOfReadableSokets = select(maxSd + 1, &watchSds, NULL, NULL, &timeout);
+    if (numberOfReadableSokets < 0 && errno != EINTR)
+        error("select error");
+
+    for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP; i++)
+    {
+        if (FD_ISSET(probes[i].sd, &watchSds))
+            receiveProbe(&probes[i]);
+    }
+}
+
+static void traceRoute(const struct sockaddr_in destination)
+{
+    Probe probes[DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP];
+    initializeProbes(probes, DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP, destination);
+
+    while (!isDone(probes))
+    {
+        struct timeval nextTimeToProcessProbes = (struct timeval){0, 0};
+        size_t probesSent = 0;
+        for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP && probesSent < DEFAULT_SIMALTANIOUS_PROBES; i++)
+        {
+            const ProcessProbeResult result = processProbe(&probes[i]);
+            if (isTimeNonZero(result.nextTimeToProcess))
+                nextTimeToProcessProbes = isTimeNonZero(nextTimeToProcessProbes)
+                                              ? timeMin(nextTimeToProcessProbes, result.nextTimeToProcess)
+                                              : result.nextTimeToProcess;
+            probesSent += result.sentNumber;
+        }
+        receiveProbeResponses(probes, nextTimeToProcessProbes);
+    }
 }
 
 int main(int argc, char *argv[])
@@ -62,91 +140,10 @@ int main(int argc, char *argv[])
             return 1;
         }
         printf("Host: %s\n", args.host);
-        struct sockaddr_in addr = parseAddrOrExitFailure(args.host);
-
-        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(addr.sin_addr),
+        struct sockaddr_in destination = parseAddrOrExitFailure(args.host);
+        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(destination.sin_addr),
                DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);
-
-        Probe probes[DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP];
-        initializeProbes(probes, NUMBER_OF_ITEMS(probes));
-        int firstProbeToProcessIndex = 0;
-        int lastProbeToProcessIndex = NUMBER_OF_ITEMS(probes);
-
-        fd_set readfds;
-        struct timeval timeout;
-        int max_sd;
-
-        while (firstProbeToProcessIndex < lastProbeToProcessIndex)
-        {
-            size_t numberOfProbesOnItsWay = 0;
-            struct timeval nextTimeToProcess;
-
-            FD_ZERO(&readfds);
-            max_sd = 0;
-
-            for (int i = 0; i + firstProbeToProcessIndex < lastProbeToProcessIndex &&
-                            numberOfProbesOnItsWay < DEFAULT_SIMALTANIOUS_PROBES;
-                 i++)
-            {
-                // Expiracy management Of firstProbeToProcessIndex
-                int probeIndex = i + firstProbeToProcessIndex;
-                if (probeIndex == firstProbeToProcessIndex && !isTimeExist(probes[probeIndex].timeReceived) &&
-                    isTimeExist(probes[probeIndex].timeSent))
-                {
-                    const struct timeval expirationTime = timeSum(probes[probeIndex].timeSent, DEFAULT_EXPIRATION_TIME);
-
-                    if (isTimeExist(timeDifference(timeOfDay(), expirationTime)))
-                    {
-                        /* Normal scenario: future expiry time */
-                        nextTimeToProcess = expirationTime;
-                    }
-                    else
-                    {
-                        /* Else scenario: expired now */
-                        expireProbe(&probes[probeIndex]);
-                    }
-                }
-                if (probes[probeIndex].timeSent.tv_sec == 0)
-                {
-                    sendProbe(&probes[probeIndex]);
-                    numberOfProbesOnItsWay++;
-                }
-                else if (probes[probeIndex].timeReceived.tv_sec != 0)
-                {
-                    printProbe(&probes[probeIndex]);
-                    probes[probeIndex].printed = true;
-                }
-                else
-                {
-                    FD_SET(probes[probeIndex].socketFd, &readfds);
-                    if (probes[probeIndex].socketFd > max_sd)
-                    {
-                        max_sd = probes[probeIndex].socketFd;
-                    }
-                }
-                numberOfProbesOnItsWay++;
-            }
-
-            timeout.tv_sec = 1;
-            timeout.tv_usec = 0;
-
-            const int numberOfReadableSokets = select(max_sd + 1, &readfds, NULL, NULL, &timeout);
-            if (numberOfReadableSokets < 0 && errno != EINTR)
-                error("select error");
-
-            for (int i = 0; i + firstProbeToProcessIndex < lastProbeToProcessIndex; i++)
-            {
-                int probeIndex = i + firstProbeToProcessIndex;
-                if (FD_ISSET(probes[probeIndex].socketFd, &readfds))
-                {
-                    // Handle the probe response here
-                    // For example, you can call a function to process the response
-                    // processProbeResponse(&probes[probeIndex]);
-                }
-            }
-
-            firstProbeToProcessIndex = getFirstProbeToProcessIndex(probes, NUMBER_OF_ITEMS(probes));
-        }
+        traceRoute(destination);
     }
     else
     {

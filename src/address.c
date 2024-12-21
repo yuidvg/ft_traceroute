@@ -31,8 +31,9 @@ struct sockaddr_in parseAddrOrExitFailure(const char *host)
     const int status = getaddrinfo(host, NULL, &hints, &res);
     if (status == 0 && res && res->ai_family == AF_INET)
     {
-        const struct sockaddr_in addr = *(struct sockaddr_in *)res->ai_addr;
+        struct sockaddr_in addr = *(struct sockaddr_in *)res->ai_addr;
         freeaddrinfo(res);
+        addr.sin_port = htons(DEFAULT_PORT);
         return addr;
     }
     else

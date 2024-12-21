@@ -18,7 +18,7 @@ int sendToAddress(int socketFd, struct sockaddr_in addr)
     for (size_t i = 0; i < DATA_SIZE; i++)
         data[i] = 0x40 + (i & 0x3f);
     const ssize_t res = sendto(socketFd, data, DATA_SIZE, 0, (struct sockaddr *)&addr, sizeof(addr));
-    printf("res: %d\n", errno);
+    // printf("res: %d\n", errno);
     if (res != -1)
     {
         return res;

@@ -27,8 +27,8 @@ void sendProbe(Probe *probe)
         return;
     }
     setTtl(socketFd, probe->ttl);
-    if (connect(socketFd, (struct sockaddr *)&probe->destination, sizeof(probe->destination)) < 0)
-        error(strerror(errno));
+    // if (connect(socketFd, (struct sockaddr *)&probe->destination, sizeof(probe->destination)) < 0)
+    //     error(strerror(errno));
     setRecverr(socketFd);
     probe->timeSent = timeOfDay();
     if (sendToAddress(socketFd, probe->destination) < 0)

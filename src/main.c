@@ -88,7 +88,9 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
         }
     }
     struct timeval timeout = timeDifference(timeOfDay(), nextTimeToProcessProbes);
-    const int numberOfReadableSokets = select(maxSd + 1, &watchSds, NULL, NULL, &timeout);
+    errno = 0;
+    const int numberOfReadableSokets = select(maxSd, &watchSds, NULL, NULL, &timeout);
+    printf("%d\n", errno);
     if (numberOfReadableSokets < 0 && errno != EINTR)
         error("select error");
 

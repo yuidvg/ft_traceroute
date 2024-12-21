@@ -11,6 +11,7 @@
 #define DEFAULT_SIMALTANIOUS_PROBES 16
 #define DEFAULT_DATA_SIZE 32
 #define DATA_SIZE DEFAULT_DATA_SIZE
+#define DEFAULT_PORT 33434
 #define DEFAULT_EXPIRATION_TIME                                                                                        \
     (struct timeval)                                                                                                   \
     {                                                                                                                  \

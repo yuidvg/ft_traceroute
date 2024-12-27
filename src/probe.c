@@ -7,7 +7,6 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
         probes[i].ttl = i / DEFAULT_PROBES_PER_HOP + 1;
         probes[i].destination = destination;
         probes[i].seq = i + 1;
-        probes[i].sd = -1;
         probes[i].final = false;
         probes[i].expired = false;
         probes[i].printed = false;
@@ -15,47 +14,82 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
     }
 }
 
-void sendProbe(Probe *probe)
+void sendProbe(Probe *probe, const Sds sds)
 {
-    int af = probe->destination.sin_family;
-
-    const int socketFd = socket(af, SOCK_DGRAM, IPPROTO_UDP);
-    if (socketFd < 0)
+    setTtl(sds.outBound, probe->ttl);
+    if (sendToAddress(sds.outBound, probe->destination) < 0)
     {
-        const size_t errorStringLen = ft_strlcpy(probe->errorString, strerror(errno), ERROR_STRING_SIZE_MAX);
-        probe->errorString[errorStringLen] = '\0';
-        return;
-    }
-    setTtl(socketFd, probe->ttl);
-    // if (connect(socketFd, (struct sockaddr *)&probe->destination, sizeof(probe->destination)) < 0)
-    //     error(strerror(errno));
-    setRecverr(socketFd);
-    probe->timeSent = timeOfDay();
-    if (sendToAddress(socketFd, probe->destination) < 0)
-    {
-        close(socketFd);
+        close(sds.outBound);
         probe->timeSent = (struct timeval){0, 0};
         return;
     }
-    probe->sd = socketFd;
+    probe->timeSent = timeOfDay();
     return;
 }
 
 void printProbe(Probe *probe)
 {
+    if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
+        printf("%2d ", probe->ttl);
     if (probe->errorString[0] == '\0')
     {
         if (!probe->expired)
         {
-            printf(" %d  %s (%s)  %ld.%03ld ms\n", probe->seq, inet_ntoa(probe->destination.sin_addr), inet_ntoa(probe->destination.sin_addr), probe->timeReceived.tv_sec, probe->timeReceived.tv_usec / 1000);
+            if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
+                printf(" %s (%s)  %ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
+                       inet_ntoa(probe->destination.sin_addr), probe->timeReceived.tv_sec,
+                       probe->timeReceived.tv_usec / 1000);
+            else
+                printf(" %ld.%03ld ms", probe->timeReceived.tv_sec, probe->timeReceived.tv_usec / 1000);
         }
         else
         {
-            printf("*\n");
+            printf(" *");
         }
     }
     else
-        printf("Error: %s\n", probe->errorString);
+        printf("[Error: %s]", probe->errorString);
+    if (probe->seq % DEFAULT_PROBES_PER_HOP == 0)
+        printf("\n");
+}
+
+Probe parseProbe(const char *buffer, ssize_t bytesReceived)
+{
+    Probe probe;
+    const struct iphdr *ipHeader = (struct iphdr *)buffer;
+    const uint32_t ipHeaderSize = ipHeader->ihl * 4;
+    if (bytesReceived < (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + sizeof(uint64_t)))
+    {
+        snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Invalid packet size. Too small: %ld", bytesReceived);
+        return probe;
+    }
+    if (ipHeader->protocol == IPPROTO_ICMP)
+    {
+        const struct icmphdr *icmpHeader = (struct icmphdr *)(buffer + ipHeaderSize);
+        const struct iphdr *originalIpHeader = (struct iphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr));
+        const uint32_t originalIpHeaderSize = originalIpHeader->ihl * 4;
+        const uint64_t *seq = (uint64_t *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
+        probe.seq = *seq;
+        if (icmpHeader->type == ICMP_DEST_UNREACH || icmpHeader->type == ICMP_TIME_EXCEEDED)
+        {
+            probe.timeReceived = timeOfDay();
+            if (icmpHeader->type == ICMP_DEST_UNREACH)
+            {
+                probe.final = true;
+            }
+            else if (icmpHeader->type == ICMP_TIME_EXCEEDED)
+            {
+                probe.final = false;
+            }
+        }
+        else
+        {
+            snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Unexpected ICMP type: %d", icmpHeader->type);
+        }
+        probe.timeReceived = timeOfDay();
+    }
+
+    return probe;
 }
 
 int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
@@ -70,39 +104,17 @@ int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
 
 void expireProbe(Probe *probe)
 {
-    close(probe->sd);
-    probe->sd = -1;
     probe->expired = true;
 }
 
-void receiveProbe(Probe *probe)
+Probe *probePointerBySeq(Probe *probes, uint64_t seq)
 {
-    char buffer[sizeof(struct iphdr) + sizeof(struct icmphdr)];
-    const ssize_t bytesReceived = recvfrom(probe->sd, buffer, sizeof(buffer), 0, NULL, NULL);
-    if (bytesReceived > (ssize_t)sizeof(struct icmphdr))
+    for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
     {
-        struct iphdr *ipHeader = (struct iphdr *)buffer;
-        (void)ipHeader;
-        struct icmphdr *icmpHeader = (struct icmphdr *)(buffer + sizeof(struct iphdr));
-        probe->timeReceived = timeOfDay();
-        if (icmpHeader->type == ICMP_DEST_UNREACH)
-        {
-            probe->final = true;
-        }
-        else if (icmpHeader->type == ICMP_TIME_EXCEEDED)
-        {
-            probe->final = false;
-        }
-        else
-        {
-            snprintf(probe->errorString, ERROR_STRING_SIZE_MAX, "Unexpected ICMP type: %d", icmpHeader->type);
-        }
+        if (probes[i].seq == (int)seq)
+            return &probes[i];
     }
-    else
-    {
-        snprintf(probe->errorString, ERROR_STRING_SIZE_MAX, "No response from %s",
-                 inet_ntoa(probe->destination.sin_addr));
-    }
+    return NULL;
 }
 
 bool isDone(Probe *probes)
@@ -113,8 +125,8 @@ bool isDone(Probe *probes)
         if (probes[i].final)
         {
             bool isAllProbesFromDestinationPrinted = true;
-            for (size_t j = (probes[i].ttl - 1) * DEFAULT_PROBES_PER_HOP; j < (size_t)probes[i].ttl * DEFAULT_PROBES_PER_HOP;
-                 j++)
+            for (size_t j = (probes[i].ttl - 1) * DEFAULT_PROBES_PER_HOP;
+                 j < (size_t)probes[i].ttl * DEFAULT_PROBES_PER_HOP; j++)
             {
                 if (!probes[j].printed)
                     isAllProbesFromDestinationPrinted = false;

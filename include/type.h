@@ -7,7 +7,6 @@ typedef struct Probe
     int ttl;
     int seq;
     struct sockaddr_in destination;
-    int sd;
     struct timeval timeSent;
     struct timeval timeReceived;
     bool final;
@@ -22,8 +21,20 @@ typedef struct Args
     const bool help;
 } Args;
 
+typedef struct Sds
+{
+    const int outBound;
+    const int inBound;
+} Sds;
+
 typedef struct ProcessProbeResult
 {
     struct timeval nextTimeToProcess;
     int sentNumber;
 } ProcessProbeResult;
+
+typedef struct ParseProbeResult
+{
+    bool success;
+    Probe probe;
+} ParseProbeResult;

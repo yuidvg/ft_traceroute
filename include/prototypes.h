@@ -19,10 +19,13 @@ struct sockaddr_in parseAddrOrExitFailure(const char *host);
 
 // Probes
 void initializeProbes(Probe *probes, size_t numberOfProbes, const struct sockaddr_in destination);
-void sendProbe(Probe *probe);
+void sendProbe(Probe *probe, const Sds sds);
 void printProbe(Probe *probe);
 void expireProbe(Probe *probe);
-void receiveProbe(Probe *probe);
+Probe *probePointerBySeq(Probe *probes, uint64_t seq);
+/*Probe is with timeReceived, final, errorString*/
+Probe parseProbe(const char *buffer, ssize_t bytesReceived);
+void receiveProbe(Probe *probe, const Sds sds);
 bool isDone(Probe *probes);
 
 // Socket
@@ -38,3 +41,4 @@ struct timeval timeOfDay();
 bool isTimeNonZero(const struct timeval time);
 struct timeval timeMax(const struct timeval time1, const struct timeval time2);
 struct timeval timeMin(const struct timeval time1, const struct timeval time2);
+bool isTimeInOrder(const struct timeval time1, const struct timeval time2);

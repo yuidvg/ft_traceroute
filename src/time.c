@@ -53,6 +53,11 @@ struct timeval timeMin(const struct timeval time1, const struct timeval time2)
     return (time1.tv_sec < time2.tv_sec || (time1.tv_sec == time2.tv_sec && time1.tv_usec < time2.tv_usec)) ? time1 : time2;
 }
 
+bool isTimeInOrder(const struct timeval time1, const struct timeval time2)
+{
+    return time1.tv_sec < time2.tv_sec || (time1.tv_sec == time2.tv_sec && time1.tv_usec < time2.tv_usec);
+}
+
 // static double get_timeout(Probe *pb)
 // {
 //     double value;

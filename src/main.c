@@ -42,16 +42,16 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
-static ProcessProbeResult processProbe(Probe *probe) // returns nextTimeToProcess
+static ProcessProbeResult processProbe(Probe *probe, const Sds sds) // returns nextTimeToProcess
 {
-    struct timeval nextTimeToProcess;
+    struct timeval nextTimeToProcess = (struct timeval){0, 0};
 
     // Expiration Management
     if (!isTimeNonZero(probe->timeReceived) && isTimeNonZero(probe->timeSent))
     {
         const struct timeval expirationTime = timeSum(probe->timeSent, DEFAULT_EXPIRATION_TIME);
 
-        if (isTimeNonZero(timeDifference(timeOfDay(), expirationTime)))
+        if (isTimeInOrder(timeOfDay(), expirationTime))
         {
             /* Normal scenario: future expiry time */
             nextTimeToProcess = expirationTime;
@@ -62,49 +62,78 @@ static ProcessProbeResult processProbe(Probe *probe) // returns nextTimeToProces
             expireProbe(probe);
         }
     }
-
     // Send Probe
-    const int sentNumber = !isTimeNonZero(probe->timeSent) ? sendProbe(probe), 1 : 0;
+    const int sentNumber = !isTimeNonZero(probe->timeSent) ? sendProbe(probe, sds), 1 : 0;
     // Print Probe
-    if (isTimeNonZero(probe->timeReceived))
+    if (isTimeNonZero(probe->timeReceived) || probe->expired)
     {
-        printProbe(probe);
+        if (!probe->printed)
+            printProbe(probe);
         probe->printed = true;
     }
     return (ProcessProbeResult){nextTimeToProcess, sentNumber};
 }
 
-static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes)
+static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const Sds sds)
 {
     fd_set watchSds;
-    int maxSd;
     FD_ZERO(&watchSds);
-    for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP; i++)
+    FD_SET(sds.inBound, &watchSds);
+
+    while (1)
     {
-        if (probes[i].sd != -1)
+        struct timeval timeout = isTimeNonZero(nextTimeToProcessProbes)
+                                     ? timeDifference(timeOfDay(), nextTimeToProcessProbes)
+                                     : (struct timeval){0, 0};
+        fd_set tempSet = watchSds; // Preserve the original set for each select call
+        errno = 0;
+        const int numberOfReadableSockets = select(sds.inBound + 1, &tempSet, NULL, NULL, &timeout);
+        // printf("%d\n", errno);
+        if (numberOfReadableSockets > 0)
         {
-            maxSd = max(maxSd, probes[i].sd);
-            FD_SET(probes[i].sd, &watchSds);
+            char buffer[RESPONSE_SIZE_MAX];
+            const ssize_t bytesReceived = recvfrom(sds.inBound, buffer, sizeof(buffer), 0, NULL, NULL);
+            if (bytesReceived >= (ssize_t)RESPONSE_SIZE_MIN)
+            {
+                Probe receivedProbe = parseProbe(buffer, bytesReceived);
+                Probe *probePointer = probePointerBySeq(probes, receivedProbe.seq);
+                if (probePointer)
+                {
+                    probePointer->timeReceived = receivedProbe.timeReceived;
+                    probePointer->final = receivedProbe.final;
+                    snprintf(probePointer->errorString, ERROR_STRING_SIZE_MAX + 1, "%s", receivedProbe.errorString);
+                }
+            }
+        }
+        else if (numberOfReadableSockets == 0)
+        {
+            break;
+        }
+        else if (numberOfReadableSockets < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            else
+                error("select error");
         }
     }
-    struct timeval timeout = timeDifference(timeOfDay(), nextTimeToProcessProbes);
-    errno = 0;
-    const int numberOfReadableSokets = select(maxSd, &watchSds, NULL, NULL, &timeout);
-    printf("%d\n", errno);
-    if (numberOfReadableSokets < 0 && errno != EINTR)
-        error("select error");
+}
 
-    for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP; i++)
-    {
-        if (FD_ISSET(probes[i].sd, &watchSds))
-            receiveProbe(&probes[i]);
-    }
+static Sds prepareSockets()
+{
+    const int outBoundSd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    const int inBoundSd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    setRecverr(outBoundSd);
+    setRecverr(inBoundSd);
+
+    return (Sds){outBoundSd, inBoundSd};
 }
 
 static void traceRoute(const struct sockaddr_in destination)
 {
     Probe probes[DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP];
     initializeProbes(probes, DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP, destination);
+    const Sds sds = prepareSockets();
 
     while (!isDone(probes))
     {
@@ -112,14 +141,14 @@ static void traceRoute(const struct sockaddr_in destination)
         size_t probesSent = 0;
         for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP && probesSent < DEFAULT_SIMALTANIOUS_PROBES; i++)
         {
-            const ProcessProbeResult result = processProbe(&probes[i]);
+            const ProcessProbeResult result = processProbe(&probes[i], sds);
             if (isTimeNonZero(result.nextTimeToProcess))
                 nextTimeToProcessProbes = isTimeNonZero(nextTimeToProcessProbes)
                                               ? timeMin(nextTimeToProcessProbes, result.nextTimeToProcess)
                                               : result.nextTimeToProcess;
             probesSent += result.sentNumber;
         }
-        receiveProbeResponses(probes, nextTimeToProcessProbes);
+        receiveProbeResponses(probes, nextTimeToProcessProbes, sds);
     }
 }
 

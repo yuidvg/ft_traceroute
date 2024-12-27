@@ -12,6 +12,8 @@
 #define DEFAULT_DATA_SIZE 32
 #define DATA_SIZE DEFAULT_DATA_SIZE
 #define DEFAULT_PORT 33434
+#define RESPONSE_SIZE_MIN (sizeof(struct iphdr) + sizeof(struct icmphdr) + sizeof(uint64_t))
+#define RESPONSE_SIZE_MAX 1280
 #define DEFAULT_EXPIRATION_TIME                                                                                        \
     (struct timeval)                                                                                                   \
     {                                                                                                                  \

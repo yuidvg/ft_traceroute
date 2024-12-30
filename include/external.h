@@ -1,5 +1,6 @@
 #pragma once
 #define _POSIX_C_SOURCE 200809L // for getaddrinfo
+#define _DEFAULT_SOURCE
 
 #include <arpa/inet.h>
 #include <errno.h>

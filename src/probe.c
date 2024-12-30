@@ -28,8 +28,8 @@ ssize_t sendProbe(Probe *probe, const Sds sds)
     //     printf("errno: %d\n", errno);
     if (errno == EHOSTUNREACH)
     {
-        const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
-                                   sizeof(destination));
+        const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0,
+                                   (struct sockaddr *)&destination, sizeof(destination));
         if (res != -1)
             probe->timeSent = timeOfDay();
         return res;
@@ -52,25 +52,23 @@ void printProbe(Probe *probe)
 {
     if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
         printf("%2d ", probe->ttl);
-    if (probe->errorString[0] == '\0')
+
+    if (!probe->expired)
     {
-        if (!probe->expired)
-        {
-            if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
-                printf(" %s (%s)  %ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
-                       inet_ntoa(probe->destination.sin_addr), timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
-                       timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
-            else
-                printf(" %ld.%03ld ms", timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
-                       timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
-        }
+        if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
+            printf(" %s (%s)  %ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
+                   inet_ntoa(probe->destination.sin_addr), timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
+                   timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
         else
-        {
-            printf(" *");
-        }
+            printf(" %ld.%03ld ms", timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
+                   timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
     }
     else
-        printf("[Error: %s]", probe->errorString);
+    {
+        printf(" *");
+    }
+    if (probe->errorString[0] != '\0')
+        printf(" %s", probe->errorString);
     if (probe->seq % DEFAULT_PROBES_PER_HOP == 0)
         printf("\n");
     probe->printed = true;
@@ -94,6 +92,7 @@ bool hasAllPreviousProbesPrinted(Probe *probe, Probe *probes)
 Probe parseProbe(const char *buffer, ssize_t bytesReceived)
 {
     Probe probe;
+    probe.seq = 0;
     const struct iphdr *ipHeader = (struct iphdr *)buffer;
     const uint32_t ipHeaderSize = ipHeader->ihl * 4;
     if (bytesReceived >= ntohs(ipHeader->tot_len) && ipHeader->protocol == IPPROTO_ICMP)
@@ -106,8 +105,8 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
             if (bytesReceived >= (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize +
                                            sizeof(struct udphdr) + sizeof(uint16_t)))
             {
-                const struct udphdr *udpHeader = (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) +
-                                                                  originalIpHeaderSize);
+                const struct udphdr *udpHeader =
+                    (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
                 const uint16_t *sequenceOnNetwork = (uint16_t *)(buffer + ipHeaderSize + sizeof(struct icmphdr) +
                                                                  originalIpHeaderSize + sizeof(struct udphdr));
                 probe.seq = ntohs(*sequenceOnNetwork);
@@ -116,21 +115,60 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
                 if (icmpHeader->type == ICMP_DEST_UNREACH)
                 {
                     probe.final = true;
+                    switch (icmpHeader->code)
+                    {
+                    case ICMP_UNREACH_NET:
+                    case ICMP_UNREACH_NET_UNKNOWN:
+                    case ICMP_UNREACH_ISOLATED:
+                    case ICMP_UNREACH_TOSNET:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!N");
+                        break;
+
+                    case ICMP_UNREACH_HOST:
+                    case ICMP_UNREACH_HOST_UNKNOWN:
+                    case ICMP_UNREACH_TOSHOST:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!H");
+                        break;
+
+                    case ICMP_UNREACH_NET_PROHIB:
+                    case ICMP_UNREACH_HOST_PROHIB:
+                    case ICMP_UNREACH_FILTER_PROHIB:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!X");
+                        break;
+
+                    case ICMP_UNREACH_PORT:
+                        break;
+
+                    case ICMP_UNREACH_PROTOCOL:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!P");
+                        break;
+
+                    case ICMP_UNREACH_NEEDFRAG:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!F-%d", icmpHeader->un.frag.mtu);
+                        break;
+
+                    case ICMP_UNREACH_SRCFAIL:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!S");
+                        break;
+
+                    case ICMP_UNREACH_HOST_PRECEDENCE:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!V");
+                        break;
+
+                    case ICMP_UNREACH_PRECEDENCE_CUTOFF:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!C");
+                        break;
+
+                    default:
+                        snprintf(probe.errorString, sizeof(probe.errorString), "!<%u>", icmpHeader->code);
+                        break;
+                    }
                 }
                 else if (icmpHeader->type == ICMP_TIME_EXCEEDED)
                 {
                     probe.final = false;
                 }
-                else
-                {
-                    snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Unexpected ICMP type: %d", icmpHeader->type);
-                }
                 (void)udpHeader;
-            }
-            else
-            {
-                snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Invalid packet size. Too small: %ld",
-                         bytesReceived);
             }
         }
     }

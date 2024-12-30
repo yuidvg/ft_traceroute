@@ -5,7 +5,7 @@
 typedef struct Probe
 {
     int ttl;
-    int seq;
+    uint16_t seq;
     struct sockaddr_in destination;
     struct timeval timeSent;
     struct timeval timeReceived;

@@ -38,7 +38,7 @@ struct sockaddr_in parseAddrOrExitFailure(const char *host)
     }
     else
     {
-        freeaddrinfo(res);
+        // freeaddrinfo(res);
         fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
         exit(EXIT_FAILURE);
     }

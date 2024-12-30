@@ -10,21 +10,42 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
         probes[i].final = false;
         probes[i].expired = false;
         probes[i].printed = false;
+        probes[i].timeSent = (struct timeval){0};
+        probes[i].timeReceived = (struct timeval){0};
         ft_memset(probes[i].errorString, '\0', sizeof(probes[i].errorString));
     }
 }
 
-void sendProbe(Probe *probe, const Sds sds)
+ssize_t sendProbe(Probe *probe, const Sds sds)
 {
+    const uint16_t sequenceOnNetwork = htons(probe->seq);
+    struct sockaddr_in destination = probe->destination;
     setTtl(sds.outBound, probe->ttl);
-    if (sendToAddress(sds.outBound, probe->destination) < 0)
+    errno = 0;
+    const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
+                               sizeof(destination));
+    // if (errno != 0)
+    //     printf("errno: %d\n", errno);
+    if (errno == EHOSTUNREACH)
     {
-        close(sds.outBound);
-        probe->timeSent = (struct timeval){0, 0};
-        return;
+        const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
+                                   sizeof(destination));
+        if (res != -1)
+            probe->timeSent = timeOfDay();
+        return res;
     }
-    probe->timeSent = timeOfDay();
-    return;
+    else if (res != -1)
+    {
+        probe->timeSent = timeOfDay();
+        return res;
+    }
+    else if (errno == ENOBUFS || errno == EAGAIN)
+        return res;
+    else if (errno == EMSGSIZE || errno == EHOSTUNREACH)
+        return 0;
+    else
+        error("send");
+    return res;
 }
 
 void printProbe(Probe *probe)
@@ -37,10 +58,11 @@ void printProbe(Probe *probe)
         {
             if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
                 printf(" %s (%s)  %ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
-                       inet_ntoa(probe->destination.sin_addr), probe->timeReceived.tv_sec,
-                       probe->timeReceived.tv_usec / 1000);
+                       inet_ntoa(probe->destination.sin_addr), timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
+                       timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
             else
-                printf(" %ld.%03ld ms", probe->timeReceived.tv_sec, probe->timeReceived.tv_usec / 1000);
+                printf(" %ld.%03ld ms", timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
+                       timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
         }
         else
         {
@@ -51,6 +73,22 @@ void printProbe(Probe *probe)
         printf("[Error: %s]", probe->errorString);
     if (probe->seq % DEFAULT_PROBES_PER_HOP == 0)
         printf("\n");
+    probe->printed = true;
+}
+
+bool isPrintableProbe(Probe *probe)
+{
+    return probe->printed == false && (probe->expired == true || isTimeNonZero(probe->timeReceived));
+}
+
+bool hasAllPreviousProbesPrinted(Probe *probe, Probe *probes)
+{
+    for (size_t i = 0; i < (size_t)probe->seq - 1; i++)
+    {
+        if (probes[i].printed == false)
+            return false;
+    }
+    return true;
 }
 
 Probe parseProbe(const char *buffer, ssize_t bytesReceived)
@@ -58,40 +96,46 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
     Probe probe;
     const struct iphdr *ipHeader = (struct iphdr *)buffer;
     const uint32_t ipHeaderSize = ipHeader->ihl * 4;
-    if (bytesReceived < (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + sizeof(uint64_t)))
-    {
-        snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Invalid packet size. Too small: %ld", bytesReceived);
-        return probe;
-    }
-    if (ipHeader->protocol == IPPROTO_ICMP)
+    if (bytesReceived >= ntohs(ipHeader->tot_len) && ipHeader->protocol == IPPROTO_ICMP)
     {
         const struct icmphdr *icmpHeader = (struct icmphdr *)(buffer + ipHeaderSize);
-        const struct iphdr *originalIpHeader = (struct iphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr));
-        const uint32_t originalIpHeaderSize = originalIpHeader->ihl * 4;
-        const uint64_t *seq = (uint64_t *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
-        probe.seq = *seq;
         if (icmpHeader->type == ICMP_DEST_UNREACH || icmpHeader->type == ICMP_TIME_EXCEEDED)
         {
-            probe.timeReceived = timeOfDay();
-            if (icmpHeader->type == ICMP_DEST_UNREACH)
+            const struct iphdr *originalIpHeader = (struct iphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr));
+            const uint32_t originalIpHeaderSize = originalIpHeader->ihl * 4;
+            if (bytesReceived >= (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize +
+                                           sizeof(struct udphdr) + sizeof(uint16_t)))
             {
-                probe.final = true;
+                const struct udphdr *udpHeader = (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) +
+                                                                  originalIpHeaderSize);
+                const uint16_t *sequenceOnNetwork = (uint16_t *)(buffer + ipHeaderSize + sizeof(struct icmphdr) +
+                                                                 originalIpHeaderSize + sizeof(struct udphdr));
+                probe.seq = ntohs(*sequenceOnNetwork);
+                probe.timeReceived = timeOfDay();
+                probe.destination.sin_addr.s_addr = ipHeader->saddr;
+                if (icmpHeader->type == ICMP_DEST_UNREACH)
+                {
+                    probe.final = true;
+                }
+                else if (icmpHeader->type == ICMP_TIME_EXCEEDED)
+                {
+                    probe.final = false;
+                }
+                else
+                {
+                    snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Unexpected ICMP type: %d", icmpHeader->type);
+                }
+                (void)udpHeader;
             }
-            else if (icmpHeader->type == ICMP_TIME_EXCEEDED)
+            else
             {
-                probe.final = false;
+                snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Invalid packet size. Too small: %ld",
+                         bytesReceived);
             }
         }
-        else
-        {
-            snprintf(probe.errorString, ERROR_STRING_SIZE_MAX, "Unexpected ICMP type: %d", icmpHeader->type);
-        }
-        probe.timeReceived = timeOfDay();
     }
-
     return probe;
 }
-
 int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
 {
     for (size_t i = 0; i < numberOfProbes; i++)
@@ -100,11 +144,6 @@ int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
             return i;
     }
     return -1;
-}
-
-void expireProbe(Probe *probe)
-{
-    probe->expired = true;
 }
 
 Probe *probePointerBySeq(Probe *probes, uint64_t seq)

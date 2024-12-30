@@ -5,3 +5,5 @@
 .DS_Store
 ft_traceroute
 *.log
+*.dSYM
+*.pcap

@@ -42,38 +42,6 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
-static ProcessProbeResult processProbe(Probe *probe, const Sds sds) // returns nextTimeToProcess
-{
-    struct timeval nextTimeToProcess = (struct timeval){0, 0};
-
-    // Expiration Management
-    if (!isTimeNonZero(probe->timeReceived) && isTimeNonZero(probe->timeSent))
-    {
-        const struct timeval expirationTime = timeSum(probe->timeSent, DEFAULT_EXPIRATION_TIME);
-
-        if (isTimeInOrder(timeOfDay(), expirationTime))
-        {
-            /* Normal scenario: future expiry time */
-            nextTimeToProcess = expirationTime;
-        }
-        else
-        {
-            /* Else scenario: expired now */
-            expireProbe(probe);
-        }
-    }
-    // Send Probe
-    const int sentNumber = !isTimeNonZero(probe->timeSent) ? sendProbe(probe, sds), 1 : 0;
-    // Print Probe
-    if (isTimeNonZero(probe->timeReceived) || probe->expired)
-    {
-        if (!probe->printed)
-            printProbe(probe);
-        probe->printed = true;
-    }
-    return (ProcessProbeResult){nextTimeToProcess, sentNumber};
-}
-
 static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const Sds sds)
 {
     fd_set watchSds;
@@ -101,6 +69,7 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
                 {
                     probePointer->timeReceived = receivedProbe.timeReceived;
                     probePointer->final = receivedProbe.final;
+                    probePointer->destination.sin_addr.s_addr = receivedProbe.destination.sin_addr.s_addr;
                     snprintf(probePointer->errorString, ERROR_STRING_SIZE_MAX + 1, "%s", receivedProbe.errorString);
                 }
             }
@@ -121,7 +90,7 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
 
 static Sds prepareSockets()
 {
-    const int outBoundSd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    const int outBoundSd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     const int inBoundSd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     setRecverr(outBoundSd);
     setRecverr(inBoundSd);
@@ -131,22 +100,48 @@ static Sds prepareSockets()
 
 static void traceRoute(const struct sockaddr_in destination)
 {
-    Probe probes[DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP];
-    initializeProbes(probes, DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP, destination);
+    Probe probes[DEFAULT_PROBES_NUMBER];
+    initializeProbes(probes, DEFAULT_PROBES_NUMBER, destination);
     const Sds sds = prepareSockets();
 
     while (!isDone(probes))
     {
         struct timeval nextTimeToProcessProbes = (struct timeval){0, 0};
-        size_t probesSent = 0;
-        for (int i = 0; i < DEFAULT_HOPS_MAX * DEFAULT_PROBES_PER_HOP && probesSent < DEFAULT_SIMALTANIOUS_PROBES; i++)
+        // Send Probes
+        for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
         {
-            const ProcessProbeResult result = processProbe(&probes[i], sds);
-            if (isTimeNonZero(result.nextTimeToProcess))
-                nextTimeToProcessProbes = isTimeNonZero(nextTimeToProcessProbes)
-                                              ? timeMin(nextTimeToProcessProbes, result.nextTimeToProcess)
-                                              : result.nextTimeToProcess;
-            probesSent += result.sentNumber;
+            if (!isTimeNonZero(probes[i].timeSent))
+                sendProbe(&probes[i], sds);
+        }
+        // Timeout Management
+        for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+        {
+            if (!isTimeNonZero(probes[i].timeReceived) && isTimeNonZero(probes[i].timeSent))
+            {
+                const struct timeval expirationTime = timeSum(probes[i].timeSent, DEFAULT_EXPIRATION_TIME);
+                if (isTimeInOrder(timeOfDay(), expirationTime))
+                {
+                    /* Normal scenario: future expiry time */
+                    if (isTimeNonZero(nextTimeToProcessProbes))
+                        nextTimeToProcessProbes = isTimeNonZero(nextTimeToProcessProbes)
+                                                      ? timeMin(nextTimeToProcessProbes, expirationTime)
+                                                      : expirationTime;
+                }
+                else
+                {
+                    /* Else scenario: expired now */
+                    probes[i].expired = true;
+                }
+            }
+        }
+        // Print Probe
+        for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+        {
+            if (isTimeNonZero(probes[i].timeReceived) || probes[i].expired)
+            {
+                if (isPrintableProbe(&probes[i]) && hasAllPreviousProbesPrinted(&probes[i], probes))
+                    printProbe(&probes[i]);
+            }
         }
         receiveProbeResponses(probes, nextTimeToProcessProbes, sds);
     }
@@ -170,7 +165,6 @@ int main(int argc, char *argv[])
             printHelp();
             return 1;
         }
-        printf("Host: %s\n", args.host);
         struct sockaddr_in destination = parseAddrOrExitFailure(args.host);
         printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(destination.sin_addr),
                DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);

@@ -14,6 +14,7 @@
 #define DEFAULT_PORT 33434
 #define RESPONSE_SIZE_MIN (sizeof(struct iphdr) + sizeof(struct icmphdr) + sizeof(uint64_t))
 #define RESPONSE_SIZE_MAX 1280
+#define UNUSED_BYTES_AFTER_ICMP_HEADER 4
 #define DEFAULT_EXPIRATION_TIME                                                                                        \
     (struct timeval)                                                                                                   \
     {                                                                                                                  \

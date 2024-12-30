@@ -19,11 +19,13 @@ struct sockaddr_in parseAddrOrExitFailure(const char *host);
 
 // Probes
 void initializeProbes(Probe *probes, size_t numberOfProbes, const struct sockaddr_in destination);
-void sendProbe(Probe *probe, const Sds sds);
+ssize_t sendProbe(Probe *probe, const Sds sds);
 void printProbe(Probe *probe);
 void expireProbe(Probe *probe);
 Probe *probePointerBySeq(Probe *probes, uint64_t seq);
-/*Probe is with timeReceived, final, errorString*/
+bool isPrintableProbe(Probe *probe);
+bool hasAllPreviousProbesPrinted(Probe *probe, Probe *probes);
+/*Probe is with seq, destination.sin_addr.s_addr, timeReceived, final, errorString*/
 Probe parseProbe(const char *buffer, ssize_t bytesReceived);
 void receiveProbe(Probe *probe, const Sds sds);
 bool isDone(Probe *probes);

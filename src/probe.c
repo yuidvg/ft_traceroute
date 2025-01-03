@@ -50,18 +50,13 @@ ssize_t sendProbe(Probe *probe, const Sds sds)
 
 void printProbe(Probe *probe)
 {
-    if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
-        printf("%2d ", probe->ttl);
+    printf("%2d. ", probe->ttl);
 
     if (!probe->expired)
     {
-        if (probe->seq % DEFAULT_PROBES_PER_HOP == 1)
-            printf(" %s (%s)  %ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
-                   inet_ntoa(probe->destination.sin_addr), timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
-                   timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
-        else
-            printf(" %ld.%03ld ms", timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
-                   timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
+        printf(" %s\t\t%ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
+               timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
+               timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
     }
     else
     {
@@ -69,8 +64,7 @@ void printProbe(Probe *probe)
     }
     if (probe->errorString[0] != '\0')
         printf(" %s", probe->errorString);
-    if (probe->seq % DEFAULT_PROBES_PER_HOP == 0)
-        printf("\n");
+    printf("\n");
     probe->printed = true;
 }
 

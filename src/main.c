@@ -166,8 +166,6 @@ int main(int argc, char *argv[])
             return 1;
         }
         struct sockaddr_in destination = parseAddrOrExitFailure(args.host);
-        printf("traceroute to %s (%s), %d hops max, %d byte packets\n", args.host, inet_ntoa(destination.sin_addr),
-               DEFAULT_HOPS_MAX, DEFAULT_PACKET_SIZE_BYTES);
         traceRoute(destination);
     }
     else

@@ -88,21 +88,19 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
     }
 }
 
-static Sds prepareSockets()
+static int prepareSocketOrExitFailure()
 {
-    const int outBoundSd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    const int inBoundSd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    setRecverr(outBoundSd);
-    setRecverr(inBoundSd);
-
-    return (Sds){outBoundSd, inBoundSd};
+    const int sd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (sd < 0)
+        error("socket");
+    return sd;
 }
 
 static void traceRoute(const struct sockaddr_in destination)
 {
     Probe probes[DEFAULT_PROBES_NUMBER];
     initializeProbes(probes, DEFAULT_PROBES_NUMBER, destination);
-    const Sds sds = prepareSockets();
+    int sd = prepareSocketOrExitFailure();
 
     while (!isDone(probes))
     {
@@ -111,7 +109,7 @@ static void traceRoute(const struct sockaddr_in destination)
         for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
         {
             if (!isTimeNonZero(probes[i].timeSent))
-                sendProbe(&probes[i], sds);
+                sendProbe(&probes[i], sd);
         }
         // Timeout Management
         for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -143,7 +141,7 @@ static void traceRoute(const struct sockaddr_in destination)
                     printProbe(&probes[i]);
             }
         }
-        receiveProbeResponses(probes, nextTimeToProcessProbes, sds);
+        receiveProbeResponses(probes, nextTimeToProcessProbes, sd);
     }
 }
 

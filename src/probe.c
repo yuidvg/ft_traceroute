@@ -16,25 +16,15 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
     }
 }
 
-ssize_t sendProbe(Probe *probe, const Sds sds)
+ssize_t sendProbe(Probe *probe, const int sd)
 {
     const uint16_t sequenceOnNetwork = htons(probe->seq);
     struct sockaddr_in destination = probe->destination;
-    setTtl(sds.outBound, probe->ttl);
+    setTtl(sd, probe->ttl);
     errno = 0;
-    const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
+    const ssize_t res = sendto(sd, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
                                sizeof(destination));
-    // if (errno != 0)
-    //     printf("errno: %d\n", errno);
-    if (errno == EHOSTUNREACH)
-    {
-        const ssize_t res = sendto(sds.outBound, &sequenceOnNetwork, sizeof(uint16_t), 0,
-                                   (struct sockaddr *)&destination, sizeof(destination));
-        if (res != -1)
-            probe->timeSent = timeOfDay();
-        return res;
-    }
-    else if (res != -1)
+    if (res != -1)
     {
         probe->timeSent = timeOfDay();
         return res;

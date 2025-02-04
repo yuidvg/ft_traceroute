@@ -42,11 +42,11 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
-static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const Sds sds)
+static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd)
 {
     fd_set watchSds;
     FD_ZERO(&watchSds);
-    FD_SET(sds.inBound, &watchSds);
+    FD_SET(sd, &watchSds);
 
     while (1)
     {
@@ -55,12 +55,12 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
                                      : (struct timeval){0, 0};
         fd_set tempSet = watchSds; // Preserve the original set for each select call
         errno = 0;
-        const int numberOfReadableSockets = select(sds.inBound + 1, &tempSet, NULL, NULL, &timeout);
+        const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
         // printf("%d\n", errno);
         if (numberOfReadableSockets > 0)
         {
             char buffer[RESPONSE_SIZE_MAX];
-            const ssize_t bytesReceived = recvfrom(sds.inBound, buffer, sizeof(buffer), 0, NULL, NULL);
+            const ssize_t bytesReceived = recvfrom(sd, buffer, sizeof(buffer), 0, NULL, NULL);
             if (bytesReceived >= (ssize_t)RESPONSE_SIZE_MIN)
             {
                 Probe receivedProbe = parseProbe(buffer, bytesReceived);

@@ -19,7 +19,7 @@ $(EXEC): $(OBJS)
 	$(CC) $(CFLAGS) -o $(EXEC) $(OBJS) $(CLIBS)
 
 $(OBJS_DIR)%.o: $(SRCS_DIR)%.c | $(OBJS_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@ $(CLIBS)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(OBJS_DIR):
 	mkdir -p $(OBJS_DIR)
@@ -30,7 +30,7 @@ $(DEBUG_EXEC): $(DEBUG_OBJS)
 	$(CC) $(CFLAGS) $(DEBUG_CFLAGS) -o $(DEBUG_EXEC) $(DEBUG_OBJS) $(CLIBS)
 
 $(DEBUG_OBJS_DIR)%.o: $(SRCS_DIR)%.c | $(DEBUG_OBJS_DIR)
-	$(CC) $(CFLAGS) $(DEBUG_CFLAGS) -c $< -o $@ $(CLIBS)
+	$(CC) $(CFLAGS) $(DEBUG_CFLAGS) -c $< -o $@
 
 $(DEBUG_OBJS_DIR):
 	mkdir -p $(DEBUG_OBJS_DIR)

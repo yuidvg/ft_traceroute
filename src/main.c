@@ -56,14 +56,32 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
         fd_set tempSet = watchSds; // Preserve the original set for each select call
         errno = 0;
         const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
-        // printf("%d\n", errno);
         if (numberOfReadableSockets > 0)
         {
-            char buffer[RESPONSE_SIZE_MAX];
-            const ssize_t bytesReceived = recvfrom(sd, buffer, sizeof(buffer), 0, NULL, NULL);
+            struct msghdr msg;
+            struct sockaddr_in from;
+            struct iovec iov;
+            char buf[RESPONSE_SIZE_MAX]; /*  min mtu for ipv6 ( >= 576 for ipv4)  */
+            // char *bufp = buf;
+            char control[1024];
+            // struct cmsghdr *cm;
+            // double recv_time = 0;
+            // struct sock_extended_err *ee = NULL;
+
+            memset(&msg, 0, sizeof(msg));
+            msg.msg_name = &from;
+            msg.msg_namelen = sizeof(from);
+            msg.msg_control = control;
+            msg.msg_controllen = sizeof(control);
+            iov.iov_base = buf;
+            iov.iov_len = sizeof(buf);
+            msg.msg_iov = &iov;
+            msg.msg_iovlen = 1;
+
+            const ssize_t bytesReceived = recvmsg(sd, &msg, MSG_ERRQUEUE);
             if (bytesReceived >= (ssize_t)RESPONSE_SIZE_MIN)
             {
-                Probe receivedProbe = parseProbe(buffer, bytesReceived);
+                Probe receivedProbe = parseProbe(iov.iov_base, bytesReceived);
                 Probe *probePointer = probePointerBySeq(probes, receivedProbe.seq);
                 if (probePointer)
                 {
@@ -90,7 +108,8 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
 
 static int prepareSocketOrExitFailure()
 {
-    const int sd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    const int sd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    setRecverr(sd);
     if (sd < 0)
         error("socket");
     return sd;

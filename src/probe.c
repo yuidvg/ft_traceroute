@@ -18,11 +18,13 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
 
 ssize_t sendProbe(Probe *probe, const int sd)
 {
-    const uint16_t sequenceOnNetwork = htons(probe->seq);
+    // const uint16_t sequenceOnNetwork = htons(probe->seq);
+    const uint64_t sequenceOnNetwork = ~0ULL;
     struct sockaddr_in destination = probe->destination;
+    destination.sin_port = htons(DEFAULT_PORT + probe->seq - 1);
     setTtl(sd, probe->ttl);
     errno = 0;
-    const ssize_t res = sendto(sd, &sequenceOnNetwork, sizeof(uint16_t), 0, (struct sockaddr *)&destination,
+    const ssize_t res = sendto(sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0, (struct sockaddr *)&destination,
                                sizeof(destination));
     if (res != -1)
     {
@@ -86,14 +88,11 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
         {
             const struct iphdr *originalIpHeader = (struct iphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr));
             const uint32_t originalIpHeaderSize = originalIpHeader->ihl * 4;
-            if (bytesReceived >= (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize +
-                                           sizeof(struct udphdr) + sizeof(uint16_t)))
+            if (bytesReceived >= (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize + sizeof(struct udphdr)))
             {
-                const struct udphdr *udpHeader =
-                    (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
-                const uint16_t *sequenceOnNetwork = (uint16_t *)(buffer + ipHeaderSize + sizeof(struct icmphdr) +
-                                                                 originalIpHeaderSize + sizeof(struct udphdr));
-                probe.seq = ntohs(*sequenceOnNetwork);
+                const struct udphdr *udpHeader = (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
+                const uint16_t destPortOnNetwork = ntohs(udpHeader->dest);
+                probe.seq = destPortOnNetwork - DEFAULT_PORT + 1;
                 probe.timeReceived = timeOfDay();
                 probe.destination.sin_addr.s_addr = ipHeader->saddr;
                 if (icmpHeader->type == ICMP_DEST_UNREACH)
@@ -152,7 +151,6 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
                 {
                     probe.final = false;
                 }
-                (void)udpHeader;
             }
         }
     }

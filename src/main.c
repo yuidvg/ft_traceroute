@@ -58,63 +58,11 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
         const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
         if (numberOfReadableSockets > 0)
         {
-            struct msghdr msg;
-            struct sockaddr_in from;
-            struct iovec iov;
-            char buf[RESPONSE_SIZE_MAX]; /*  min mtu for ipv6 ( >= 576 for ipv4)  */
-            char control[1024];
-
-            memset(&msg, 0, sizeof(msg));
-            msg.msg_name = &from;
-            msg.msg_namelen = sizeof(from);
-            msg.msg_control = control;
-            msg.msg_controllen = sizeof(control);
-            iov.iov_base = buf;
-            iov.iov_len = sizeof(buf);
-            msg.msg_iov = &iov;
-            msg.msg_iovlen = 1;
-
-            const ssize_t bytesReceived = recvmsg(sd, &msg, MSG_ERRQUEUE);
-            fprintf(stderr, "errno: %d\n", errno);
-            struct cmsghdr *cmsg;
-            for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg))
-            {
-                if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR)
-                {
-                    struct sock_extended_err *serr = (struct sock_extended_err *)CMSG_DATA(cmsg);
-
-                    printf("Received error:\n");
-                    printf("  ee_errno  : %u\n", serr->ee_errno);
-                    printf("  ee_origin : %u\n", serr->ee_origin);
-                    printf("  ee_type   : %u\n", serr->ee_type);
-                    printf("  ee_code   : %u\n", serr->ee_code);
-                    printf("  ee_info   : %u\n", serr->ee_info);
-                    printf("  ee_data   : %u\n", serr->ee_data);
-
-                    // Obtain the original packet from ancillary data.
-                    unsigned char *orig_packet = (unsigned char *)serr + sizeof(struct sock_extended_err);
-
-                    // Parse the IP header from the original packet.
-                    struct iphdr *iph = (struct iphdr *)orig_packet;
-                    char ip_str[INET_ADDRSTRLEN];
-                    inet_ntop(AF_INET, &iph->saddr, ip_str, sizeof(ip_str));
-                    printf("Original packet source IP: %s\n", ip_str);
-
-                    // Calculate IP header length and locate the UDP header.
-                    int ip_header_length = iph->ihl * 4;
-                    struct udphdr *udph = (struct udphdr *)(orig_packet + ip_header_length);
-                    printf("Original UDP source port: %u\n", ntohs(udph->source));
-                    printf("Original UDP dest port  : %u\n", ntohs(udph->dest));
-
-                    // Correctly obtain the original UDP payload from the original packet data.
-                    uint16_t udpPayload;
-                    memcpy(&udpPayload, orig_packet + ip_header_length + sizeof(struct udphdr), sizeof(udpPayload));
-                    printf("Original UDP payload: %u\n", ntohs(udpPayload));
-                }
-            }
+            char buffer[RESPONSE_SIZE_MAX];
+            const ssize_t bytesReceived = recvfrom(sd, buffer, sizeof(buffer), 0, NULL, NULL);
             if (bytesReceived >= (ssize_t)RESPONSE_SIZE_MIN)
             {
-                Probe receivedProbe = parseProbe(iov.iov_base, bytesReceived);
+                Probe receivedProbe = parseProbe(buffer, bytesReceived);
                 Probe *probePointer = probePointerBySeq(probes, receivedProbe.seq);
                 if (probePointer)
                 {
@@ -142,19 +90,28 @@ static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeTo
 static int prepareSocketOrExitFailure(const int protocol)
 {
     const int sd = socket(AF_INET, protocol == IPPROTO_ICMP ? SOCK_RAW : SOCK_DGRAM, protocol);
-    if (protocol == IPPROTO_UDP)
-        setRecverrOrExitFailure(sd);
+    // if (protocol == IPPROTO_ICMP)
+    //     setRecverrOrExitFailure(sd);
     if (sd < 0)
         error("socket");
     return sd;
 }
 
+static bool hasFinalProbePrinted(Probe *probes)
+{
+    for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+    {
+        if (probes[i].final && probes[i].printed)
+            return true;
+    }
+    return false;
+}
 static void traceRoute(const struct sockaddr_in destination)
 {
     Probe probes[DEFAULT_PROBES_NUMBER];
     initializeProbes(probes, DEFAULT_PROBES_NUMBER, destination);
     const int outboundSd = prepareSocketOrExitFailure(IPPROTO_UDP);
-    // const int inboundSd = prepareSocketOrExitFailure(IPPROTO_ICMP);
+    const int inboundSd = prepareSocketOrExitFailure(IPPROTO_ICMP);
 
     while (!isDone(probes))
     {
@@ -191,11 +148,11 @@ static void traceRoute(const struct sockaddr_in destination)
         {
             if (isTimeNonZero(probes[i].timeReceived) || probes[i].expired)
             {
-                if (isPrintableProbe(&probes[i]) && hasAllPreviousProbesPrinted(&probes[i], probes))
+                if (isPrintableProbe(&probes[i]) && hasAllPreviousProbesPrinted(&probes[i], probes) && !hasFinalProbePrinted(probes))
                     printProbe(&probes[i]);
             }
         }
-        receiveProbeResponses(probes, nextTimeToProcessProbes, outboundSd);
+        receiveProbeResponses(probes, nextTimeToProcessProbes, inboundSd);
     }
 }
 

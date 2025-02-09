@@ -10,7 +10,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/ft_traceroute_debug.out",
 			"args": [
-				"google.co"
+				"1.1.1.1"
 			],
 			"stopAtEntry": false,
 			"cwd": "${workspaceFolder}",

@@ -8,7 +8,7 @@ void setTtl(int socketFd, int ttl)
     currentTtl = ttl;
 }
 
-void setRecverr(int socketFd)
+void setRecverrOrExitFailure(int socketFd)
 {
     int val = 1;
     if (setsockopt(socketFd, SOL_IP, IP_RECVERR, &val, sizeof(val)) < 0)

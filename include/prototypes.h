@@ -32,7 +32,7 @@ bool isDone(Probe *probes);
 
 // Socket
 void setTtl(int socketFd, int ttl);
-void setRecverr(int socketFd);
+void setRecverrOrExitFailure(int socketFd);
 int sendToAddress(int socketFd, const struct sockaddr_in addr);
 
 // Time

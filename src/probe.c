@@ -46,7 +46,7 @@ void printProbe(Probe *probe)
 
     if (!probe->expired)
     {
-        printf(" %s\t\t%ld.%03ld ms", inet_ntoa(probe->destination.sin_addr),
+        printf(" %s\t%ld.%01ld ms", inet_ntoa(probe->destination.sin_addr),
                timeDifference(probe->timeSent, probe->timeReceived).tv_sec,
                timeDifference(probe->timeSent, probe->timeReceived).tv_usec / 1000);
     }

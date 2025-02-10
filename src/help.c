@@ -2,5 +2,5 @@
 
 void printHelp()
 {
-    printf("Usage: traceroute [ --help ] host\n");
+    printf("Usage:\n  traceroute [ --help ] host\n");
 }

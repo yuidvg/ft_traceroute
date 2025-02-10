@@ -7,7 +7,7 @@ struct timeval timeDifference(const struct timeval start, const struct timeval e
     struct timeval result;
     result.tv_sec = end.tv_sec - start.tv_sec;
     result.tv_usec = end.tv_usec - start.tv_usec;
-    if (result.tv_usec < 0) {
+    while (result.tv_usec < 0) {
         result.tv_sec -= 1;
         result.tv_usec += 1000000;
     }

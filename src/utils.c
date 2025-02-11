@@ -2,7 +2,7 @@
 
 int ft_strcmp(const char *s1, const char *s2)
 {
-    size_t i;
+    size_t i = 0;
 
     while (s1[i] || s2[i])
     {
@@ -15,13 +15,10 @@ int ft_strcmp(const char *s1, const char *s2)
 
 int ft_memcmp(const void *s1, const void *s2, size_t n)
 {
-    size_t i;
-    unsigned char *s1c;
-    unsigned char *s2c;
+    size_t i = 0;
+    unsigned char *s1c = (unsigned char *)s1;
+    unsigned char *s2c = (unsigned char *)s2;
 
-    s1c = (unsigned char *)s1;
-    s2c = (unsigned char *)s2;
-    i = 0;
     while (i < n)
     {
         if (s1c[i] != s2c[i])
@@ -33,9 +30,8 @@ int ft_memcmp(const void *s1, const void *s2, size_t n)
 
 void *ft_memset(void *b, int c, size_t len)
 {
-    size_t i;
+    size_t i = 0;
 
-    i = 0;
     while (i < len)
     {
         *((unsigned char *)b + i) = (unsigned char)c;
@@ -46,9 +42,8 @@ void *ft_memset(void *b, int c, size_t len)
 
 size_t ft_strlcpy(char *dst, const char *src, size_t dstsize)
 {
-    size_t i;
+    size_t i = 0;
 
-    i = 0;
     if (dstsize == 0)
         return (ft_strlen(src));
     while (src[i] && i < dstsize - 1)
@@ -62,9 +57,8 @@ size_t ft_strlcpy(char *dst, const char *src, size_t dstsize)
 
 size_t ft_strlen(const char *s)
 {
-    size_t count;
+    size_t count = 0;
 
-    count = 0;
     if (!s)
         return (0);
     while (s[count])

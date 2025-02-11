@@ -13,6 +13,7 @@ typedef struct Probe
     char errorString[ERROR_STRING_SIZE_MAX + 1];
     bool expired;
     bool printed;
+    int sd;
 } Probe;
 
 typedef struct Args

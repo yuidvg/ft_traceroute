@@ -15,3 +15,12 @@ void setRecverrOrExitFailure(int socketFd)
         error("setsockopt IP_RECVERR");
 }
 
+int prepareSocketOrExitFailure(const int protocol)
+{
+    const int sd = socket(AF_INET, protocol == IPPROTO_ICMP ? SOCK_RAW : SOCK_DGRAM, protocol);
+    if (protocol == IPPROTO_UDP)
+        setRecverrOrExitFailure(sd);
+    if (sd < 0)
+        error("socket");
+    return sd;
+}

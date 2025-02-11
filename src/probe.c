@@ -12,20 +12,22 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
         probes[i].printed = false;
         probes[i].timeSent = (struct timeval){0};
         probes[i].timeReceived = (struct timeval){0};
+        probes[i].sd = prepareSocketOrExitFailure(IPPROTO_UDP);
         ft_memset(probes[i].errorString, '\0', sizeof(probes[i].errorString));
     }
 }
 
 ssize_t sendProbe(Probe *probe, const int sd)
 {
+    (void)sd;
     // const uint16_t sequenceOnNetwork = htons(probe->seq);
     const uint64_t sequenceOnNetwork = ~0ULL;
     struct sockaddr_in destination = probe->destination;
-    destination.sin_port = htons(DEFAULT_PORT + probe->seq - 1);
-    setTtl(sd, probe->ttl);
+    destination.sin_port = htons(DEFAULT_PORT + probe->ttl - 1);
+    setTtl(probe->sd, probe->ttl);
     errno = 0;
-    const ssize_t res = sendto(sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0, (struct sockaddr *)&destination,
-                               sizeof(destination));
+    const ssize_t res = sendto(probe->sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0,
+                               (struct sockaddr *)&destination, sizeof(destination));
     if (res != -1)
     {
         probe->timeSent = timeOfDay();
@@ -87,13 +89,64 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
         {
             const struct iphdr *originalIpHeader = (struct iphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr));
             const uint32_t originalIpHeaderSize = originalIpHeader->ihl * 4;
-            if (bytesReceived >= (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize + sizeof(struct udphdr)))
+            if (bytesReceived >=
+                (ssize_t)(ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize + sizeof(struct udphdr)))
             {
-                const struct udphdr *udpHeader = (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
-                const uint16_t destPortOnNetwork = ntohs(udpHeader->dest);
-                probe.seq = destPortOnNetwork - DEFAULT_PORT + 1;
+                const struct udphdr *udpHeader =
+                    (struct udphdr *)(buffer + ipHeaderSize + sizeof(struct icmphdr) + originalIpHeaderSize);
+                (void)udpHeader;
+                // const uint16_t destPortOnNetwork = ntohs(udpHeader->dest);
+                // probe.seq = destPortOnNetwork - DEFAULT_PORT + 1;
                 probe.timeReceived = timeOfDay();
                 probe.destination.sin_addr.s_addr = ipHeader->saddr;
+
+                // // For Debug, print the contents of the packet received
+                // printf("==============================================\n");
+                // printf("Packet received:\n");
+
+                // // IP Header details
+                // printf("IP Header:\n");
+                // printf("  Version: %d\n", ipHeader->version);
+                // printf("  IHL: %d words (%d bytes)\n", ipHeader->ihl, ipHeader->ihl * 4);
+                // printf("  Type of Service: %d\n", ipHeader->tos);
+                // printf("  Total Length: %d\n", ntohs(ipHeader->tot_len));
+                // printf("  Identification: %d\n", ntohs(ipHeader->id));
+                // printf("  Flags/Fragment Offset: %d\n", ntohs(ipHeader->frag_off));
+                // printf("  TTL: %d\n", ipHeader->ttl);
+                // printf("  Protocol: %d\n", ipHeader->protocol);
+                // printf("  Header Checksum: 0x%x\n", ntohs(ipHeader->check));
+                // printf("  Source IP: %s\n", inet_ntoa(*(struct in_addr *)&ipHeader->saddr));
+                // printf("  Destination IP: %s\n", inet_ntoa(*(struct in_addr *)&ipHeader->daddr));
+
+                // // ICMP Header details
+                // printf("ICMP Header:\n");
+                // printf("  Type: %d\n", icmpHeader->type);
+                // printf("  Code: %d\n", icmpHeader->code);
+                // printf("  Checksum: 0x%x\n", ntohs(icmpHeader->checksum));
+
+                // // Original IP Header details
+                // printf("Original IP Header:\n");
+                // printf("  Version: %d\n", originalIpHeader->version);
+                // printf("  IHL: %d words (%d bytes)\n", originalIpHeader->ihl, originalIpHeader->ihl * 4);
+                // printf("  Type of Service: %d\n", originalIpHeader->tos);
+                // printf("  Total Length: %d\n", ntohs(originalIpHeader->tot_len));
+                // printf("  Identification: %d\n", ntohs(originalIpHeader->id));
+                // printf("  Flags/Fragment Offset: %d\n", ntohs(originalIpHeader->frag_off));
+                // printf("  TTL: %d\n", originalIpHeader->ttl);
+                // printf("  Protocol: %d\n", originalIpHeader->protocol);
+                // printf("  Header Checksum: 0x%x\n", ntohs(originalIpHeader->check));
+                // printf("  Source IP: %s\n", inet_ntoa(*(struct in_addr *)&originalIpHeader->saddr));
+                // printf("  Destination IP: %s\n", inet_ntoa(*(struct in_addr *)&originalIpHeader->daddr));
+
+                // // UDP Header details
+                // printf("UDP Header:\n");
+                // printf("  Source Port: %d\n", ntohs(udpHeader->source));
+                // printf("  Destination Port: %d\n", ntohs(udpHeader->dest));
+                // printf("  Length: %d\n", ntohs(udpHeader->len));
+                // printf("  Checksum: 0x%x\n", ntohs(udpHeader->check));
+
+                // printf("==============================================\n");
+
                 if (icmpHeader->type == ICMP_DEST_UNREACH)
                 {
                     probe.final = true;
@@ -155,6 +208,148 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
     }
     return probe;
 }
+
+void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd)
+{
+    (void)sd;
+    fd_set watchSds;
+    FD_ZERO(&watchSds);
+    for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+    {
+        FD_SET(probes[i].sd, &watchSds);
+    }
+
+    while (1)
+    {
+        struct timeval timeout = isTimeNonZero(nextTimeToProcessProbes)
+                                     ? timeDifference(timeOfDay(), nextTimeToProcessProbes)
+                                     : (struct timeval){0, 0};
+        fd_set tempSet = watchSds; // Preserve the original set for each select call
+        errno = 0;
+        const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
+        if (numberOfReadableSockets > 0)
+        {
+            for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+            {
+                int currentSd = probes[i].sd;
+                if (FD_ISSET(currentSd, &tempSet))
+                {
+
+                    char buffer[RESPONSE_SIZE_MAX];
+                    struct iovec iov;
+                    iov.iov_base = buffer;
+                    iov.iov_len = sizeof(buffer);
+
+                    struct msghdr msg;
+                    memset(&msg, 0, sizeof(msg));
+
+                    struct sockaddr_in srcAddr;
+                    msg.msg_name = &srcAddr;
+                    msg.msg_namelen = sizeof(srcAddr);
+
+                    msg.msg_iov = &iov;
+                    msg.msg_iovlen = 1;
+
+                    char ctrl[CMSG_SPACE(sizeof(struct sock_extended_err))];
+                    memset(ctrl, 0, sizeof(ctrl));
+                    msg.msg_control = ctrl;
+                    msg.msg_controllen = sizeof(ctrl);
+
+                    const ssize_t bytesReceived = recvmsg(currentSd, &msg, MSG_ERRQUEUE);
+                    if (bytesReceived >= 0)
+                    {
+                        struct sock_extended_err *sock_err = NULL;
+                        struct cmsghdr *cmsg;
+                        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg))
+                        {
+                            if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR)
+                            {
+                                sock_err = (struct sock_extended_err *)CMSG_DATA(cmsg);
+                                break;
+                            }
+                        }
+
+                        Probe *probePointer = probePointerBySd(probes, currentSd);
+                        if (probePointer)
+                        {
+                            probePointer->timeReceived = timeOfDay();
+
+                            if (sock_err)
+                            {
+                                printf("==============================================\n");
+                                printf("DEBUG: Received ICMP error on socket FD: %d\n", currentSd);
+                                printf("DEBUG: Probe sequence: %llu\n", (unsigned long long)probePointer->seq);
+                                printf("DEBUG: Time Sent: %ld.%06ld, Time Received: %ld.%06ld\n",
+                                       (long)probePointer->timeSent.tv_sec, (long)probePointer->timeSent.tv_usec,
+                                       (long)probePointer->timeReceived.tv_sec,
+                                       (long)probePointer->timeReceived.tv_usec);
+                                printf("DEBUG: Sock extended error details:\n");
+                                printf("       ee_errno: %d\n", sock_err->ee_errno);
+                                printf("       ee_origin: %d\n", sock_err->ee_origin);
+                                printf("       ee_type: %d\n", sock_err->ee_type);
+                                printf("       ee_code: %d\n", sock_err->ee_code);
+                                printf("       ee_info: %u\n", sock_err->ee_info);
+                                printf("       ee_data: %u\n", sock_err->ee_data);
+                                {
+                                    printf("DEBUG: ICMP error originated from %s:%d\n", inet_ntoa(srcAddr.sin_addr),
+                                           ntohs(srcAddr.sin_port));
+                                    printf("==============================================\n");
+                                    // Set final flag based on the ICMP error type
+                                    if (sock_err->ee_type == ICMP_TIME_EXCEEDED)
+                                        probePointer->final = false;
+                                    else
+                                        probePointer->final = true;
+
+                                    // Update destination with the origin of the ICMP error
+                                    probePointer->destination.sin_addr.s_addr = srcAddr.sin_addr.s_addr;
+
+                                    // Set errorString based on the ICMP error code
+                                    switch (sock_err->ee_code)
+                                    {
+                                    case ICMP_UNREACH_NET:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!N");
+                                        break;
+                                    case ICMP_UNREACH_HOST:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!H");
+                                        break;
+                                    case ICMP_UNREACH_PROTOCOL:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!P");
+                                        break;
+                                    case ICMP_UNREACH_PORT:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!X");
+                                        break;
+                                    case ICMP_UNREACH_HOST_PRECEDENCE:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!V");
+                                        break;
+                                    case ICMP_UNREACH_PRECEDENCE_CUTOFF:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!C");
+                                        break;
+                                    default:
+                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!<%u>",
+                                                 sock_err->ee_code);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        else if (numberOfReadableSockets == 0)
+        {
+            break;
+        }
+        else if (numberOfReadableSockets < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            else
+                error("select error");
+        }
+    }
+}
+
 int getFirstProbeToProcessIndex(Probe *probes, size_t numberOfProbes)
 {
     for (size_t i = 0; i < numberOfProbes; i++)
@@ -170,6 +365,16 @@ Probe *probePointerBySeq(Probe *probes, uint64_t seq)
     for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
     {
         if (probes[i].seq == (int)seq)
+            return &probes[i];
+    }
+    return NULL;
+}
+
+Probe *probePointerBySd(Probe *probes, int sd)
+{
+    for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
+    {
+        if (probes[i].sd == sd)
             return &probes[i];
     }
     return NULL;

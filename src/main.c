@@ -42,61 +42,6 @@ static Args parseArgs(int argc, char *argv[])
     return (Args){host, help};
 }
 
-static void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd)
-{
-    fd_set watchSds;
-    FD_ZERO(&watchSds);
-    FD_SET(sd, &watchSds);
-
-    while (1)
-    {
-        struct timeval timeout = isTimeNonZero(nextTimeToProcessProbes)
-                                     ? timeDifference(timeOfDay(), nextTimeToProcessProbes)
-                                     : (struct timeval){0, 0};
-        fd_set tempSet = watchSds; // Preserve the original set for each select call
-        errno = 0;
-        const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
-        if (numberOfReadableSockets > 0)
-        {
-            char buffer[RESPONSE_SIZE_MAX];
-            const ssize_t bytesReceived = recvfrom(sd, buffer, sizeof(buffer), 0, NULL, NULL);
-            if (bytesReceived >= (ssize_t)RESPONSE_SIZE_MIN)
-            {
-                Probe receivedProbe = parseProbe(buffer, bytesReceived);
-                Probe *probePointer = probePointerBySeq(probes, receivedProbe.seq);
-                if (probePointer)
-                {
-                    probePointer->timeReceived = receivedProbe.timeReceived;
-                    probePointer->final = receivedProbe.final;
-                    probePointer->destination.sin_addr.s_addr = receivedProbe.destination.sin_addr.s_addr;
-                    snprintf(probePointer->errorString, ERROR_STRING_SIZE_MAX + 1, "%s", receivedProbe.errorString);
-                }
-            }
-        }
-        else if (numberOfReadableSockets == 0)
-        {
-            break;
-        }
-        else if (numberOfReadableSockets < 0)
-        {
-            if (errno == EINTR)
-                continue;
-            else
-                error("select error");
-        }
-    }
-}
-
-static int prepareSocketOrExitFailure(const int protocol)
-{
-    const int sd = socket(AF_INET, protocol == IPPROTO_ICMP ? SOCK_RAW : SOCK_DGRAM, protocol);
-    // if (protocol == IPPROTO_ICMP)
-    //     setRecverrOrExitFailure(sd);
-    if (sd < 0)
-        error("socket");
-    return sd;
-}
-
 static bool hasFinalProbePrinted(Probe *probes)
 {
     for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -106,12 +51,12 @@ static bool hasFinalProbePrinted(Probe *probes)
     }
     return false;
 }
+
 static void traceRoute(const struct sockaddr_in destination)
 {
     Probe probes[DEFAULT_PROBES_NUMBER];
     initializeProbes(probes, DEFAULT_PROBES_NUMBER, destination);
     const int outboundSd = prepareSocketOrExitFailure(IPPROTO_UDP);
-    const int inboundSd = prepareSocketOrExitFailure(IPPROTO_ICMP);
 
     while (!isDone(probes))
     {
@@ -148,11 +93,12 @@ static void traceRoute(const struct sockaddr_in destination)
         {
             if (isTimeNonZero(probes[i].timeReceived) || probes[i].expired)
             {
-                if (isPrintableProbe(&probes[i]) && hasAllPreviousProbesPrinted(&probes[i], probes) && !hasFinalProbePrinted(probes))
+                if (isPrintableProbe(&probes[i]) && hasAllPreviousProbesPrinted(&probes[i], probes) &&
+                    !hasFinalProbePrinted(probes))
                     printProbe(&probes[i]);
             }
         }
-        receiveProbeResponses(probes, nextTimeToProcessProbes, inboundSd);
+        receiveProbeResponses(probes, nextTimeToProcessProbes, outboundSd);
     }
 }
 

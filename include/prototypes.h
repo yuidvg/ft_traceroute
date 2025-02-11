@@ -23,17 +23,20 @@ ssize_t sendProbe(Probe *probe, const int sd);
 void printProbe(Probe *probe);
 void expireProbe(Probe *probe);
 Probe *probePointerBySeq(Probe *probes, uint64_t seq);
+Probe *probePointerBySd(Probe *probes, int sd);
 bool isPrintableProbe(Probe *probe);
 bool hasAllPreviousProbesPrinted(Probe *probe, Probe *probes);
 /*Probe is with seq, destination.sin_addr.s_addr, timeReceived, final, errorString*/
 Probe parseProbe(const char *buffer, ssize_t bytesReceived);
 void receiveProbe(Probe *probe, const int sd);
 bool isDone(Probe *probes);
+void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd);
 
 // Socket
 void setTtl(int socketFd, int ttl);
 void setRecverrOrExitFailure(int socketFd);
 int sendToAddress(int socketFd, const struct sockaddr_in addr);
+int prepareSocketOrExitFailure(const int protocol);
 
 // Time
 struct timeval timeDifference(const struct timeval start, const struct timeval end);

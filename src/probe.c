@@ -12,7 +12,7 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
         probes[i].printed = false;
         probes[i].timeSent = (struct timeval){0};
         probes[i].timeReceived = (struct timeval){0};
-        probes[i].sd = prepareSocketOrExitFailure(IPPROTO_UDP);
+        probes[i].sd = prepareSocketOrExitFailure(IPPROTO_UDP, destination);
         ft_memset(probes[i].errorString, '\0', sizeof(probes[i].errorString));
     }
 }
@@ -22,12 +22,9 @@ ssize_t sendProbe(Probe *probe, const int sd)
     (void)sd;
     // const uint16_t sequenceOnNetwork = htons(probe->seq);
     const uint64_t sequenceOnNetwork = ~0ULL;
-    struct sockaddr_in destination = probe->destination;
-    destination.sin_port = htons(DEFAULT_PORT + probe->ttl - 1);
     setTtl(probe->sd, probe->ttl);
     errno = 0;
-    const ssize_t res = sendto(probe->sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0,
-                               (struct sockaddr *)&destination, sizeof(destination));
+    const ssize_t res = send(probe->sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0);
     if (res != -1)
     {
         probe->timeSent = timeOfDay();
@@ -226,7 +223,7 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                                      : (struct timeval){0, 0};
         fd_set tempSet = watchSds; // Preserve the original set for each select call
         errno = 0;
-        const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
+        const int numberOfReadableSockets = select(probes[DEFAULT_PROBES_NUMBER - 1].sd + 1, &tempSet, NULL, NULL, &timeout);
         if (numberOfReadableSockets > 0)
         {
             for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -250,87 +247,20 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                     msg.msg_iov = &iov;
                     msg.msg_iovlen = 1;
 
-                    char ctrl[CMSG_SPACE(sizeof(struct sock_extended_err))];
-                    memset(ctrl, 0, sizeof(ctrl));
-                    msg.msg_control = ctrl;
-                    msg.msg_controllen = sizeof(ctrl);
+                    char control[1024];
+                    memset(control, 0, sizeof(control));
+                    msg.msg_control = control;
+                    msg.msg_controllen = sizeof(control);
 
                     const ssize_t bytesReceived = recvmsg(currentSd, &msg, MSG_ERRQUEUE);
                     if (bytesReceived >= 0)
                     {
-                        struct sock_extended_err *sock_err = NULL;
-                        struct cmsghdr *cmsg;
-                        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg))
-                        {
-                            if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR)
-                            {
-                                sock_err = (struct sock_extended_err *)CMSG_DATA(cmsg);
-                                break;
-                            }
-                        }
-
+                        const struct sockaddr_in offender = parseOffender(msg);
                         Probe *probePointer = probePointerBySd(probes, currentSd);
                         if (probePointer)
                         {
                             probePointer->timeReceived = timeOfDay();
-
-                            if (sock_err)
-                            {
-                                printf("==============================================\n");
-                                printf("DEBUG: Received ICMP error on socket FD: %d\n", currentSd);
-                                printf("DEBUG: Probe sequence: %llu\n", (unsigned long long)probePointer->seq);
-                                printf("DEBUG: Time Sent: %ld.%06ld, Time Received: %ld.%06ld\n",
-                                       (long)probePointer->timeSent.tv_sec, (long)probePointer->timeSent.tv_usec,
-                                       (long)probePointer->timeReceived.tv_sec,
-                                       (long)probePointer->timeReceived.tv_usec);
-                                printf("DEBUG: Sock extended error details:\n");
-                                printf("       ee_errno: %d\n", sock_err->ee_errno);
-                                printf("       ee_origin: %d\n", sock_err->ee_origin);
-                                printf("       ee_type: %d\n", sock_err->ee_type);
-                                printf("       ee_code: %d\n", sock_err->ee_code);
-                                printf("       ee_info: %u\n", sock_err->ee_info);
-                                printf("       ee_data: %u\n", sock_err->ee_data);
-                                {
-                                    printf("DEBUG: ICMP error originated from %s:%d\n", inet_ntoa(srcAddr.sin_addr),
-                                           ntohs(srcAddr.sin_port));
-                                    printf("==============================================\n");
-                                    // Set final flag based on the ICMP error type
-                                    if (sock_err->ee_type == ICMP_TIME_EXCEEDED)
-                                        probePointer->final = false;
-                                    else
-                                        probePointer->final = true;
-
-                                    // Update destination with the origin of the ICMP error
-                                    probePointer->destination.sin_addr.s_addr = srcAddr.sin_addr.s_addr;
-
-                                    // Set errorString based on the ICMP error code
-                                    switch (sock_err->ee_code)
-                                    {
-                                    case ICMP_UNREACH_NET:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!N");
-                                        break;
-                                    case ICMP_UNREACH_HOST:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!H");
-                                        break;
-                                    case ICMP_UNREACH_PROTOCOL:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!P");
-                                        break;
-                                    case ICMP_UNREACH_PORT:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!X");
-                                        break;
-                                    case ICMP_UNREACH_HOST_PRECEDENCE:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!V");
-                                        break;
-                                    case ICMP_UNREACH_PRECEDENCE_CUTOFF:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!C");
-                                        break;
-                                    default:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!<%u>",
-                                                 sock_err->ee_code);
-                                        break;
-                                    }
-                                }
-                            }
+                            probePointer->destination = offender;
                         }
                     }
                 }

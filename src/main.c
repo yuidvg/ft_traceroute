@@ -56,7 +56,6 @@ static void traceRoute(const struct sockaddr_in destination)
 {
     Probe probes[DEFAULT_PROBES_NUMBER];
     initializeProbes(probes, DEFAULT_PROBES_NUMBER, destination);
-    const int outboundSd = prepareSocketOrExitFailure(IPPROTO_UDP);
 
     while (!isDone(probes))
     {
@@ -65,7 +64,7 @@ static void traceRoute(const struct sockaddr_in destination)
         for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
         {
             if (!isTimeNonZero(probes[i].timeSent))
-                sendProbe(&probes[i], outboundSd);
+                sendProbe(&probes[i],1);
         }
         // Timeout Management
         for (int i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -98,7 +97,7 @@ static void traceRoute(const struct sockaddr_in destination)
                     printProbe(&probes[i]);
             }
         }
-        receiveProbeResponses(probes, nextTimeToProcessProbes, outboundSd);
+        receiveProbeResponses(probes, nextTimeToProcessProbes, 1);
     }
 }
 

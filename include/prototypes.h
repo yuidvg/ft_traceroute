@@ -36,7 +36,7 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
 void setTtl(int socketFd, int ttl);
 void setRecverrOrExitFailure(int socketFd);
 int sendToAddress(int socketFd, const struct sockaddr_in addr);
-int prepareSocketOrExitFailure(const int protocol);
+int prepareSocketOrExitFailure(const int protocol, struct sockaddr_in dest_addr);
 
 // Time
 struct timeval timeDifference(const struct timeval start, const struct timeval end);
@@ -47,3 +47,6 @@ bool isTimeNonZero(const struct timeval time);
 struct timeval timeMax(const struct timeval time1, const struct timeval time2);
 struct timeval timeMin(const struct timeval time1, const struct timeval time2);
 bool isTimeInOrder(const struct timeval time1, const struct timeval time2);
+
+// UDP
+struct sockaddr_in parseOffender(struct msghdr msg);

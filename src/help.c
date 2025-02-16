@@ -3,4 +3,5 @@
 void printHelp()
 {
     printf("Usage:\n  traceroute [ --help ] host\n");
+
 }

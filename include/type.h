@@ -1,6 +1,22 @@
 #pragma once
 
+#include "values.h"
 #include "external.h"
+
+typedef struct
+{
+    struct icmphdr icmpHeader;
+    uint8_t data[PAYLOAD_SIZE_MAX]; // Payload data
+    size_t dataLen; // Data length
+} IcmpEchoRequest;
+
+
+union common_sockaddr {
+	struct sockaddr sa;
+	struct sockaddr_in sin;
+	struct sockaddr_in6 sin6;
+};
+typedef union common_sockaddr sockaddr_any;
 
 typedef struct Probe
 {
@@ -14,6 +30,7 @@ typedef struct Probe
     bool expired;
     bool printed;
     int sd;
+    sockaddr_any offender;
 } Probe;
 
 typedef struct Args

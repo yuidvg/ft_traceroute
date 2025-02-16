@@ -23,23 +23,23 @@ int equal_addr(const struct sockaddr_in *a, const struct sockaddr_in *b)
 
 struct sockaddr_in parseAddrOrExitFailure(const char *host)
 {
-    const struct addrinfo hints = {
-        .ai_family = AF_INET,
-    };
+    struct addrinfo hints;
     struct addrinfo *res;
+    int errcode;
 
-    const int status = getaddrinfo(host, NULL, &hints, &res);
-    if (status == 0 && res && res->ai_family == AF_INET)
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_RAW;
+    hints.ai_protocol = IPPROTO_ICMP;
+
+    if ((errcode = getaddrinfo(host, NULL, &hints, &res)) != 0)
     {
-        struct sockaddr_in addr = *(struct sockaddr_in *)res->ai_addr;
-        freeaddrinfo(res);
-        addr.sin_port = htons(DEFAULT_PORT);
-        return addr;
-    }
-    else
-    {
-        // freeaddrinfo(res);
-        fprintf(stderr, "%s: %s\n", host, gai_strerror(status));
+        fprintf(stderr, "ft_ping: unknown host\n");
         exit(EXIT_FAILURE);
     }
+
+    struct sockaddr_in addr = *(struct sockaddr_in *)res->ai_addr;
+
+    freeaddrinfo(res);
+    return addr;
 }

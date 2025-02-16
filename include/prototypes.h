@@ -13,13 +13,19 @@ size_t ft_strlen(const char *s);
 void error(const char *str);
 int max(int a, int b);
 int min(int a, int b);
+void *ft_memcpy(void *dst, const void *src, size_t n);
 
 // Address
 struct sockaddr_in parseAddrOrExitFailure(const char *host);
 
+// Icmp
+IcmpEchoRequest constructIcmpEchoRequest(uint16_t id, uint16_t sequenceNumber, char *padPattern, size_t padPatternLen,
+                                         size_t dataLen);
+void encodeIcmpEchoRequest(IcmpEchoRequest icmpEchoRequest, char *buffer);
+
 // Probes
 void initializeProbes(Probe *probes, size_t numberOfProbes, const struct sockaddr_in destination);
-ssize_t sendProbe(Probe *probe, const int sd);
+ssize_t sendProbe(Probe *probe);
 void printProbe(Probe *probe);
 void expireProbe(Probe *probe);
 Probe *probePointerBySeq(Probe *probes, uint64_t seq);
@@ -30,13 +36,13 @@ bool hasAllPreviousProbesPrinted(Probe *probe, Probe *probes);
 Probe parseProbe(const char *buffer, ssize_t bytesReceived);
 void receiveProbe(Probe *probe, const int sd);
 bool isDone(Probe *probes);
-void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd);
+void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes);
 
 // Socket
-void setTtl(int socketFd, int ttl);
+void setTtlOrExitFailure(int socketFd, int ttl);
 void setRecverrOrExitFailure(int socketFd);
 int sendToAddress(int socketFd, const struct sockaddr_in addr);
-int prepareSocketOrExitFailure(const int protocol);
+int prepareSocketOrExitFailure(const int protocol, const struct sockaddr_in destination, const int ttl);
 
 // Time
 struct timeval timeDifference(const struct timeval start, const struct timeval end);

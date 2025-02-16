@@ -9,7 +9,21 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Configure tool-specific properties.
-	// "customizations": {},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"github.copilot"
+			]
+		},
+		"cursor": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"github.copilot",
+				"ms-vscode.makefile-tools"
+			]
+		}
+	},
 	"postCreateCommand": "apt update && apt install -y gdb traceroute tcpdump valgrind",
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	"remoteUser": "root"

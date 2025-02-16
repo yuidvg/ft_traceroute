@@ -12,22 +12,17 @@ void initializeProbes(Probe *probes, size_t count, const struct sockaddr_in dest
         probes[i].printed = false;
         probes[i].timeSent = (struct timeval){0};
         probes[i].timeReceived = (struct timeval){0};
-        probes[i].sd = prepareSocketOrExitFailure(IPPROTO_UDP);
+        probes[i].sd = prepareSocketOrExitFailure(IPPROTO_ICMP, destination, probes[i].ttl);
         ft_memset(probes[i].errorString, '\0', sizeof(probes[i].errorString));
     }
 }
 
-ssize_t sendProbe(Probe *probe, const int sd)
+ssize_t sendProbe(Probe *probe)
 {
-    (void)sd;
     // const uint16_t sequenceOnNetwork = htons(probe->seq);
     const uint64_t sequenceOnNetwork = ~0ULL;
-    struct sockaddr_in destination = probe->destination;
-    destination.sin_port = htons(DEFAULT_PORT + probe->ttl - 1);
-    setTtl(probe->sd, probe->ttl);
     errno = 0;
-    const ssize_t res = sendto(probe->sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0,
-                               (struct sockaddr *)&destination, sizeof(destination));
+    const ssize_t res = send(probe->sd, &sequenceOnNetwork, sizeof(sequenceOnNetwork), 0);
     if (res != -1)
     {
         probe->timeSent = timeOfDay();
@@ -59,6 +54,7 @@ void printProbe(Probe *probe)
         printf(" %s", probe->errorString);
     printf("\n");
     probe->printed = true;
+    close(probe->sd);
 }
 
 bool isPrintableProbe(Probe *probe)
@@ -209,9 +205,23 @@ Probe parseProbe(const char *buffer, ssize_t bytesReceived)
     return probe;
 }
 
-void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes, const int sd)
+static void parseImcpError(Probe *probe, struct sock_extended_err *ee)
 {
-    (void)sd;
+    if (ee->ee_origin == SO_EE_ORIGIN_ICMP)
+    {
+        if (ee->ee_type == ICMP_TIME_EXCEEDED)
+        {
+            probe->final = false;
+        }
+        else if (ee->ee_type == ICMP_DEST_UNREACH)
+        {
+            probe->final = true;
+        }
+    }
+}
+
+void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcessProbes)
+{
     fd_set watchSds;
     FD_ZERO(&watchSds);
     for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -226,7 +236,8 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                                      : (struct timeval){0, 0};
         fd_set tempSet = watchSds; // Preserve the original set for each select call
         errno = 0;
-        const int numberOfReadableSockets = select(sd + 1, &tempSet, NULL, NULL, &timeout);
+        const int numberOfReadableSockets =
+            select(probes[DEFAULT_PROBES_NUMBER - 1].sd + 1, &tempSet, NULL, NULL, &timeout);
         if (numberOfReadableSockets > 0)
         {
             for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)
@@ -256,80 +267,95 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                     msg.msg_controllen = sizeof(ctrl);
 
                     const ssize_t bytesReceived = recvmsg(currentSd, &msg, MSG_ERRQUEUE);
-                    if (bytesReceived >= 0)
+
+                    /* 補助データ（control message）の解析 */
+                    for (struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg))
                     {
-                        struct sock_extended_err *sock_err = NULL;
-                        struct cmsghdr *cmsg;
-                        for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg))
+
+                        /* SOL_IP レベルで IP_RECVERR タイプのコントロールメッセージかを確認 */
+                        if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR)
                         {
-                            if (cmsg->cmsg_level == SOL_IP && cmsg->cmsg_type == IP_RECVERR)
+                            /* コントロールメッセージから sock_extended_err 構造体へのポインタを取得 */
+                            struct sock_extended_err *see = (struct sock_extended_err *)CMSG_DATA(cmsg);
+                            if (see)
                             {
-                                sock_err = (struct sock_extended_err *)CMSG_DATA(cmsg);
-                                break;
+                                /*
+                                 * SO_EE_OFFENDER マクロを使って、sock_extended_err の直後にある
+                                 * オフェンダーのアドレス（struct sockaddr 型）へのポインタを取得する
+                                 */
+                                struct sockaddr *offender = SO_EE_OFFENDER(see);
+
+                                /* オフェンダーのアドレスは、エラー原因となったアドレスです */
+                                if (offender->sa_family == AF_INET)
+                                {
+                                    struct sockaddr_in *sin = (struct sockaddr_in *)offender;
+                                    printf("エラー原因のIPv4アドレス: %s\n", inet_ntoa(sin->sin_addr));
+                                }
+                                /* 必要に応じて、他のプロトコルの場合の処理も追加できます */
                             }
                         }
+                    }
 
+                    if (bytesReceived >= 0)
+                    {
                         Probe *probePointer = probePointerBySd(probes, currentSd);
                         if (probePointer)
                         {
                             probePointer->timeReceived = timeOfDay();
-
-                            if (sock_err)
+                            struct cmsghdr *cmsg;
+                            struct sock_extended_err *ee;
+                            for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg))
                             {
-                                printf("==============================================\n");
-                                printf("DEBUG: Received ICMP error on socket FD: %d\n", currentSd);
-                                printf("DEBUG: Probe sequence: %llu\n", (unsigned long long)probePointer->seq);
-                                printf("DEBUG: Time Sent: %ld.%06ld, Time Received: %ld.%06ld\n",
-                                       (long)probePointer->timeSent.tv_sec, (long)probePointer->timeSent.tv_usec,
-                                       (long)probePointer->timeReceived.tv_sec,
-                                       (long)probePointer->timeReceived.tv_usec);
-                                printf("DEBUG: Sock extended error details:\n");
-                                printf("       ee_errno: %d\n", sock_err->ee_errno);
-                                printf("       ee_origin: %d\n", sock_err->ee_origin);
-                                printf("       ee_type: %d\n", sock_err->ee_type);
-                                printf("       ee_code: %d\n", sock_err->ee_code);
-                                printf("       ee_info: %u\n", sock_err->ee_info);
-                                printf("       ee_data: %u\n", sock_err->ee_data);
+                                const void *cmsgData = CMSG_DATA(cmsg);
+
+                                if (cmsg->cmsg_level == SOL_SOCKET)
                                 {
-                                    printf("DEBUG: ICMP error originated from %s:%d\n", inet_ntoa(srcAddr.sin_addr),
-                                           ntohs(srcAddr.sin_port));
-                                    printf("==============================================\n");
-                                    // Set final flag based on the ICMP error type
-                                    if (sock_err->ee_type == ICMP_TIME_EXCEEDED)
-                                        probePointer->final = false;
-                                    else
-                                        probePointer->final = true;
-
-                                    // Update destination with the origin of the ICMP error
-                                    probePointer->destination.sin_addr.s_addr = srcAddr.sin_addr.s_addr;
-
-                                    // Set errorString based on the ICMP error code
-                                    switch (sock_err->ee_code)
+                                    if (cmsg->cmsg_type == SO_TIMESTAMP)
                                     {
-                                    case ICMP_UNREACH_NET:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!N");
-                                        break;
-                                    case ICMP_UNREACH_HOST:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!H");
-                                        break;
-                                    case ICMP_UNREACH_PROTOCOL:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!P");
-                                        break;
-                                    case ICMP_UNREACH_PORT:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!X");
-                                        break;
-                                    case ICMP_UNREACH_HOST_PRECEDENCE:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!V");
-                                        break;
-                                    case ICMP_UNREACH_PRECEDENCE_CUTOFF:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!C");
-                                        break;
-                                    default:
-                                        snprintf(probePointer->errorString, sizeof(probePointer->errorString), "!<%u>",
-                                                 sock_err->ee_code);
-                                        break;
+                                        struct timeval *timeStamp = (struct timeval *)cmsgData;
+
+                                        probePointer->timeReceived = *timeStamp;
                                     }
                                 }
+                                else if (cmsg->cmsg_level == SOL_IP)
+                                {
+                                    // if (cmsg->cmsg_type == IP_TTL)
+                                    //     recv_ttl = *((int *)cmsgData);
+                                    if (cmsg->cmsg_type == IP_RECVERR)
+                                    {
+                                        ee = (struct sock_extended_err *)cmsgData;
+                                        if (ee->ee_origin != SO_EE_ORIGIN_ICMP && ee->ee_origin != SO_EE_ORIGIN_LOCAL)
+                                            return;
+                                        /*  dgram icmp sockets might return extra things...  */
+                                        if (ee->ee_origin == SO_EE_ORIGIN_ICMP &&
+                                            (ee->ee_type == ICMP_SOURCE_QUENCH || ee->ee_type == ICMP_REDIRECT))
+                                            return;
+                                    }
+                                }
+                                else if (cmsg->cmsg_level == SOL_IPV6)
+                                {
+                                    // if (cmsg->cmsg_type == IPV6_HOPLIMIT)
+                                    //     recv_ttl = *((int *)cmsgData);
+                                    if (cmsg->cmsg_type == IPV6_RECVERR)
+                                    {
+                                        ee = (struct sock_extended_err *)cmsgData;
+                                        if (ee->ee_origin != SO_EE_ORIGIN_ICMP6 && ee->ee_origin != SO_EE_ORIGIN_LOCAL)
+                                            return;
+                                    }
+                                }
+                            }
+                            if (ee && ee->ee_origin != SO_EE_ORIGIN_LOCAL)
+                            {
+                                struct sockaddr *offender = SO_EE_OFFENDER(ee);
+                                ft_memcpy(&probePointer->offender, offender, sizeof(probePointer->offender));
+                                parseImcpError(probePointer, ee);
+                                FD_CLR(probePointer->sd, &watchSds);
+                                char buf[1024];
+                                buf[0] = '\0';
+                                getnameinfo(&probePointer->offender.sa, sizeof(probePointer->offender), buf,
+                                            sizeof(buf), 0, 0, 32);
+                                printf("offender: %s\n", buf);
+                                printf("srcAddr: %s\n", inet_ntoa(srcAddr.sin_addr));
                             }
                         }
                     }

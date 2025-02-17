@@ -255,12 +255,11 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                     const ssize_t bytesReceived = recvmsg(currentSd, &msg, MSG_ERRQUEUE);
                     if (bytesReceived >= 0)
                     {
-                        const struct sockaddr_in offender = parseOffender(msg);
                         Probe *probePointer = probePointerBySd(probes, currentSd);
                         if (probePointer)
                         {
                             probePointer->timeReceived = timeOfDay();
-                            probePointer->destination = offender;
+                            parseOffender(msg, probePointer);
                         }
                     }
                 }

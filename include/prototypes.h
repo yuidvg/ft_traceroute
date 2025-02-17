@@ -49,4 +49,4 @@ struct timeval timeMin(const struct timeval time1, const struct timeval time2);
 bool isTimeInOrder(const struct timeval time1, const struct timeval time2);
 
 // UDP
-struct sockaddr_in parseOffender(struct msghdr msg);
+void parseOffender(struct msghdr msg, Probe *probePointer);

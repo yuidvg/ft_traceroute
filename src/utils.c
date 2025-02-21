@@ -68,7 +68,7 @@ size_t ft_strlen(const char *s)
 
 void error(const char *str)
 {
-    fprintf(stderr, "%s\n", str);
+    // fprintf(stderr, "%s\n", str);
     perror(str);
     exit(EXIT_FAILURE);
 }

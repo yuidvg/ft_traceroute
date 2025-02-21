@@ -12,6 +12,7 @@ size_t ft_strlcpy(char *dst, const char *src, size_t dstsize);
 size_t ft_strlen(const char *s);
 void error(const char *str);
 int max(int a, int b);
+double_t dmax(double_t a, double_t b);
 int min(int a, int b);
 
 // Address

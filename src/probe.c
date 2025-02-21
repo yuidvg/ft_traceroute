@@ -45,8 +45,8 @@ void printProbe(Probe *probe)
 
     if (!probe->expired)
     {
-        printf(" %s\t%.1f ms", inet_ntoa(probe->destination.sin_addr),
-               timeValInMiliseconds(timeDifference(probe->timeSent, probe->timeReceived)));
+        printf(" %-15s\t%.1f ms", inet_ntoa(probe->destination.sin_addr),
+               dmax(0.0, timeValInMiliseconds(timeDifference(probe->timeSent, probe->timeReceived))));
     }
     else
     {
@@ -223,7 +223,8 @@ void receiveProbeResponses(Probe *probes, const struct timeval nextTimeToProcess
                                      : (struct timeval){0, 0};
         fd_set tempSet = watchSds; // Preserve the original set for each select call
         errno = 0;
-        const int numberOfReadableSockets = select(probes[DEFAULT_PROBES_NUMBER - 1].sd + 1, &tempSet, NULL, NULL, &timeout);
+        const int numberOfReadableSockets =
+            select(probes[DEFAULT_PROBES_NUMBER - 1].sd + 1, &tempSet, NULL, NULL, &timeout);
         if (numberOfReadableSockets > 0)
         {
             for (size_t i = 0; i < DEFAULT_PROBES_NUMBER; i++)

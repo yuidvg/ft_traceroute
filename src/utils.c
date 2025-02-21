@@ -77,6 +77,11 @@ int max(int a, int b)
     return a > b ? a : b;
 }
 
+double_t dmax(double_t a, double_t b)
+{
+    return a > b ? a : b;
+}
+
 int min(int a, int b)
 {
     return a < b ? a : b;
